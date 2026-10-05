@@ -53,7 +53,7 @@ For the Radeon 9070 XT plus DP-to-HDMI adapter setup:
 
 ```bash
 sudo pacman -S cec-utils pipewire wireplumber python
-bash <(curl -fsSL https://raw.githubusercontent.com/Twsts/steamos-cec-toolkit/main/scripts/easy-install.sh)
+REPO_URL=https://github.com/kripikripi/steamos-cec-toolkit.git bash <(curl -fsSL https://raw.githubusercontent.com/kripikripi/steamos-cec-toolkit/kripikripi-cachyos-cec-support/scripts/easy-install.sh)
 ```
 
 The installer discovers `/dev/cec*` devices and generates a per-user
@@ -86,7 +86,7 @@ Recommended install path:
 Run this on the SteamOS machine as the normal desktop user, usually `deck`:
 
 ```bash
-bash <(curl -fsSL https://github.com/Twsts/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh)
+bash <(curl -fsSL https://github.com/kripikripi/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh)
 ```
 
 The installer will:
@@ -135,7 +135,7 @@ If you do not use Decky, the toolkit can still be managed from the command line:
 Development builds can be installed from `main` with:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Twsts/steamos-cec-toolkit/main/scripts/easy-install.sh)
+REPO_URL=https://github.com/kripikripi/steamos-cec-toolkit.git bash <(curl -fsSL https://raw.githubusercontent.com/kripikripi/steamos-cec-toolkit/kripikripi-cachyos-cec-support/scripts/easy-install.sh)
 ```
 
 ## Requirements
@@ -265,7 +265,7 @@ If you use Decky, the plugin is the first place to check:
 The normal repair step is simply to rerun the latest installer:
 
 ```bash
-bash <(curl -fsSL https://github.com/Twsts/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh)
+bash <(curl -fsSL https://github.com/kripikripi/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh)
 ```
 
 This refreshes the root helpers, sudoers rule, systemd units, WirePlumber
@@ -280,7 +280,7 @@ To verify SteamOS atomic-update persistence on systems that include
 `holo-sync-var`, run:
 
 ```bash
-bash <(curl -fsSL https://github.com/Twsts/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh) --verify
+bash <(curl -fsSL https://github.com/kripikripi/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh) --verify
 ```
 
 The installer keeps the atomic update manifest installed either way. `--verify`
@@ -349,7 +349,7 @@ enabled explicitly.
 Clone the repo on the SteamOS machine as the normal SteamOS desktop user:
 
 ```bash
-git clone https://github.com/Twsts/steamos-cec-toolkit.git
+git clone https://github.com/kripikripi/steamos-cec-toolkit.git
 cd steamos-cec-toolkit
 ```
 
