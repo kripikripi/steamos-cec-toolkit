@@ -10,8 +10,15 @@ import os
 import time
 from pathlib import Path
 
-from dbus_next import BusType
-from dbus_next.aio import MessageBus
+try:
+    from dbus_next import BusType
+    from dbus_next.aio import MessageBus
+except ImportError:
+    BusType = None
+    MessageBus = None
+
+import glob
+import re
 
 
 BUS_NAME = "com.steampowered.CecDaemon1"
@@ -73,6 +80,23 @@ CONNECTOR_POLL_SECONDS = float(
 )
 CEC_DEVICE = CONFIG.get("CEC_DEVICE", "/dev/cec0")
 TV_LOGICAL_ADDRESS = CONFIG.get("TV_LOGICAL_ADDRESS", "0")
+GAMESCOPE_SESSION_SERVICE_UNIT = CONFIG.get(
+    "GAMESCOPE_SESSION_SERVICE_UNIT", "gamescope-session.service"
+)
+GAMESCOPE_SESSION_TARGET_UNIT = CONFIG.get(
+    "GAMESCOPE_SESSION_TARGET_UNIT", "gamescope-session.target"
+)
+CEC_ACTIVE_SOURCE_OPCODES = {
+    int(token, 16)
+    for token in CONFIG.get("CEC_ACTIVE_SOURCE_OPCODES", "0x2f:0x33")
+    .replace(",", ":").split(":")
+    if token
+}
+CEC_PHYSICAL_ADDRESS = CONFIG.get("CEC_PHYSICAL_ADDRESS", "")
+
+MONITOR_HEADER_RE = re.compile(
+    r"(?:Received from|Transmitted by)\b.*\((\d+) to (\d+)\):"
+)
 RECOVER_ON_TV_POWER_ON = CONFIG.get("GAMESCOPE_RECOVER_ON_TV_POWER_ON", "1") not in {
     "0",
     "false",
@@ -132,9 +156,12 @@ async def recover_gamescope(reason: str, delay: float) -> None:
     if CONNECTOR_STATUS.exists() and CONNECTOR_STATUS.read_text().strip() != "connected":
         LOG.warning("%s is not connected; skipping Gamescope recovery", CONNECTOR_STATUS)
         return
+    if not CONNECTOR_STATUS.exists() and connector_status() != "connected":
+        LOG.info("Configured connector missing and no DRM connector connected; skipping Gamescope recovery")
+        return
 
     returncode, _ = await command(
-        "systemctl", "--user", "is-active", "--quiet", "gamescope-session.service"
+        "systemctl", "--user", "is-active", "--quiet", GAMESCOPE_SESSION_SERVICE_UNIT
     )
     if returncode != 0:
         LOG.info("Gaming Mode is not active; skipping Gamescope recovery")
@@ -142,7 +169,7 @@ async def recover_gamescope(reason: str, delay: float) -> None:
 
     LOG.info("Restarting Gamescope session target (%s)", reason)
     returncode, output = await command(
-        "systemctl", "--user", "restart", "gamescope-session.target"
+        "systemctl", "--user", "restart", GAMESCOPE_SESSION_TARGET_UNIT
     )
     if returncode != 0:
         LOG.error("Gamescope recovery failed: %s", output or returncode)
@@ -175,7 +202,15 @@ def connector_status() -> str:
     try:
         return CONNECTOR_STATUS.read_text().strip()
     except OSError:
-        return "unknown"
+        pass
+    for path in sorted(glob.iglob("/sys/class/drm/card*-DP-*/status")):
+        try:
+            status = path.read_text().strip()
+        except OSError:
+            continue
+        if status == "connected":
+            return status
+    return "unknown"
 
 
 def parse_power_status(output: str) -> str:
@@ -204,7 +239,37 @@ async def tv_power_status() -> str:
     return parse_power_status(output)
 
 
+async def own_logical_address() -> int | None:
+    returncode, output = await command("cec-ctl", "-d", CEC_DEVICE, "-s", "--logical-address")
+    if returncode != 0:
+        return None
+    match = re.search(r"[0-9]+", output)
+    return int(match.group(0)) if match else None
+
+
+def parse_physical_address(text: str) -> list[int] | None:
+    parts = [int(part, 10) for part in text.split(".")[:2] if part != ""]
+    if not parts:
+        return None
+    while len(parts) < 2:
+        parts.append(0)
+    return parts
+
+
 async def monitor_cec(state: dict[str, object]) -> None:
+    if MessageBus is not None:
+        try:
+            await monitor_cec_cecd(state)
+            return
+        except Exception as error:
+            LOG.warning(
+                "SteamOS cecd D-Bus unavailable (%s); "
+                "monitoring Active state via cec-ctl raw monitor" % error
+            )
+    await monitor_cec_raw(state)
+
+
+async def monitor_cec_cecd(state: dict[str, object]) -> None:
     bus = await MessageBus().connect()
     introspection = await bus.introspect(BUS_NAME, DEVICE_PATH)
     proxy = bus.get_proxy_object(BUS_NAME, DEVICE_PATH, introspection)
@@ -230,6 +295,70 @@ async def monitor_cec(state: dict[str, object]) -> None:
 
     properties.on_properties_changed(properties_changed)
     await asyncio.get_running_loop().create_future()
+
+
+async def monitor_cec_raw(state: dict[str, object]) -> None:
+    """Track CEC Active state without SteamOS cecd using cec-ctl's monitor."""
+    while True:
+        own_la = await own_logical_address()
+        if own_la is None:
+            LOG.warning("No logical address on %s; retrying" % CEC_DEVICE)
+            await asyncio.sleep(10)
+            continue
+        own_physical = parse_physical_address(CEC_PHYSICAL_ADDRESS)
+        LOG.info(
+            "Monitoring CEC Active state via raw monitor; own logical address=%s, initial state=%s",
+            own_la,
+            state["active"],
+        )
+        started = time.time()
+        process = await asyncio.create_subprocess_exec(
+            "cec-ctl",
+            "--device",
+            CEC_DEVICE,
+            "-s",
+            "--monitor-all",
+            "--ignore=all,poll",
+            "--show-raw",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        source = destination = None
+        while True:
+            line_bytes = await process.stdout.readline()
+            if not line_bytes:
+                break
+            line = line_bytes.decode(errors="replace").rstrip("\n")
+            match = MONITOR_HEADER_RE.search(line)
+            if match:
+                source, destination = int(match.group(1)), int(match.group(2))
+                continue
+            if source is None or not line.lstrip().startswith("Raw:"):
+                continue
+            tokens = line.lstrip()[len("Raw:"):].split()
+            try:
+                payload = [int(token, 16) for token in tokens]
+            except ValueError:
+                continue
+            if len(payload) >= 3 and payload[2] in CEC_ACTIVE_SOURCE_OPCODES:
+                if destination == 15:
+                    active = bool(
+                        own_physical
+                        and len(payload) >= 5
+                        and payload[3:5] == own_physical
+                    )
+                else:
+                    active = destination == own_la
+                previous = bool(state["active"])
+                state["active"] = active
+                if previous != active:
+                    LOG.info("CEC Active changed: %s -> %s", previous, active)
+                if active and not previous:
+                    schedule_recovery(state, "CEC source became active")
+        await process.wait()
+        if time.time() - started < 5:
+            LOG.warning("cec-ctl monitor exited immediately; retrying")
+            await asyncio.sleep(10)
 
 
 async def monitor_connector(state: dict[str, object]) -> None:

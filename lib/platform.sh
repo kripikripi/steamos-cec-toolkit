@@ -14,6 +14,15 @@ cec_is_steamos() {
   [[ "$(cec_platform_id)" == "steamos" ]]
 }
 
+# Distributions without Valve's cecd: CachyOS (including cachyos-handheld style
+# IDs) and Arch rely on cec-ctl raw fallbacks plus the adapter-config service.
+cec_platform_generic_cec() {
+  case "$(cec_platform_id)" in
+    cachyos|cachyos-*|arch|arch-*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 cec_optional_user_service_available() {
   systemctl --user cat "$1" >/dev/null 2>&1
 }

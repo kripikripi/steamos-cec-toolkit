@@ -41,12 +41,15 @@ sudo systemctl disable --now steamos-cec-before-sleep.service 2>/dev/null || tru
 sudo systemctl disable --now steamos-cec-permissions.service 2>/dev/null || true
 sudo systemctl disable --now steamos-cec-usb-wake.service 2>/dev/null || true
 sudo systemctl disable --now steamos-cec-resume-wake.service 2>/dev/null || true
+sudo systemctl disable --now steamos-cec-adapter-config.service 2>/dev/null || true
 sudo rm -f /etc/systemd/system/steamos-cec-before-sleep.service
 sudo rm -f /etc/systemd/system/steamos-cec-permissions.service
 sudo rm -f /etc/systemd/system/steamos-cec-usb-wake.service
 sudo rm -f /etc/systemd/system/steamos-cec-resume-wake.service
+sudo rm -f /etc/systemd/system/steamos-cec-adapter-config.service
 sudo rm -f /etc/systemd/system-sleep/steamos-cec-system-sleep
 sudo rm -f /etc/udev/rules.d/70-steamos-cec-toolkit.rules
+sudo rm -f /etc/udev/rules.d/99-steamos-cec-adapter-config.rules
 sudo rm -f /etc/atomic-update.conf.d/steamos-cec-toolkit.conf
 sudo rm -f /etc/sudoers.d/zz-steamos-cec-toolkit-volume
 sudo rm -rf /var/lib/steamos-cec-toolkit

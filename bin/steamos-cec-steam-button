@@ -121,7 +121,10 @@ def read_config(path: str = DEFAULT_CONFIG) -> dict[str, str]:
 
 CONFIG = read_config(os.environ.get("STEAMOS_CEC_CONFIG", DEFAULT_CONFIG))
 STEAMOS_CEC_USER = CONFIG.get("STEAMOS_CEC_USER", "deck")
-USER_CONFIG = f"/home/{STEAMOS_CEC_USER}/.config/steamos-cec-toolkit/config.conf"
+_cec_user_home = os.path.expanduser("~" + STEAMOS_CEC_USER)
+if not _cec_user_home.startswith("/"):
+    _cec_user_home = f"/home/{STEAMOS_CEC_USER}"
+USER_CONFIG = f"{_cec_user_home}/.config/steamos-cec-toolkit/config.conf"
 CONFIG.update(read_config(USER_CONFIG))
 HID_ID = CONFIG.get("STEAM_BUTTON_HID_ID", "0003:000028DE:00001304")
 EXCLUDED_PHYS = CONFIG.get("STEAM_BUTTON_EXCLUDED_PHYS", "input6")

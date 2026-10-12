@@ -6,9 +6,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 
-from dbus_next.aio import MessageBus
+try:
+    from dbus_next.aio import MessageBus
+except ImportError:
+    MessageBus = None
 
 
 BUS_NAME = "com.steampowered.CecDaemon1"
@@ -39,6 +43,15 @@ def read_config(path: str = DEFAULT_CONFIG) -> dict[str, str]:
 CONFIG = read_config(os.environ.get("STEAMOS_CEC_CONFIG", DEFAULT_CONFIG))
 TV_LOGICAL_ADDRESS = int(CONFIG.get("TV_LOGICAL_ADDRESS", "0"), 0)
 CEC_STANDBY_OPCODE = int(CONFIG.get("CEC_STANDBY_OPCODE", "0x36"), 0)
+CEC_DEVICE = CONFIG.get("CEC_DEVICE", "/dev/cec0")
+
+MONITOR_HEADER_RE = re.compile(
+    r"^(?:Received from|Transmitted by)\b.*\((\d+) to (\d+)\):"
+)
+
+
+def cec_device_exists() -> bool:
+    return os.path.exists(CEC_DEVICE)
 
 
 def local_suspend_in_progress() -> bool:
@@ -60,7 +73,7 @@ async def suspend() -> None:
         LOG.warning("Suspend failed: %s", stdout.decode(errors="replace").strip())
 
 
-async def main() -> None:
+async def monitor_cecd() -> None:
     bus = await MessageBus().connect()
     introspection = await bus.introspect(BUS_NAME, DEVICE_PATH)
     proxy = bus.get_proxy_object(BUS_NAME, DEVICE_PATH, introspection)
@@ -80,8 +93,76 @@ async def main() -> None:
             asyncio.create_task(suspend())
 
     device.on_received_message(received_message)
-    LOG.info("Monitoring HDMI-CEC TV standby broadcasts")
+    LOG.info("Monitoring HDMI-CEC TV standby broadcasts via cecd")
     await asyncio.get_running_loop().create_future()
+
+
+async def monitor_raw() -> None:
+    """Watch CEC traffic directly from the CEC device using cec-ctl (no SteamOS cecd).
+
+    cec-ctl --monitor-all --show-raw prints a header line such as
+    'Received from TV to all (0 to 15): ...' followed by a '\tRaw: 0x..' line.
+    """
+    if not cec_device_exists():
+        LOG.error("No CEC device at %s and cecd is unavailable; waiting" % CEC_DEVICE)
+    while True:
+        if not cec_device_exists():
+            await asyncio.sleep(10)
+            continue
+        started = time.time()
+        process = await asyncio.create_subprocess_exec(
+            "cec-ctl",
+            "--device",
+            CEC_DEVICE,
+            "-s",
+            "--monitor-all",
+            "--ignore=all,poll",
+            "--show-raw",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        source = destination = None
+        while True:
+            line_bytes = await process.stdout.readline()
+            if not line_bytes:
+                break
+            line = line_bytes.decode(errors="replace").rstrip("\n")
+            match = MONITOR_HEADER_RE.search(line)
+            if match:
+                source, destination = int(match.group(1)), int(match.group(2))
+                continue
+            if source is None or not line.lstrip().startswith("Raw:"):
+                continue
+            tokens = line.lstrip()[len("Raw:"):].split()
+            try:
+                payload = [int(token, 16) for token in tokens]
+            except ValueError:
+                continue
+            if source == TV_LOGICAL_ADDRESS and destination == 15 and len(payload) >= 3:
+                opcode = payload[2]
+                if opcode == CEC_STANDBY_OPCODE:
+                    if local_suspend_in_progress():
+                        LOG.info("Ignoring TV standby caused by local suspend")
+                        continue
+                    LOG.info("TV broadcast standby; suspending (raw monitor)")
+                    asyncio.create_task(suspend())
+        await process.wait()
+        if time.time() - started < 5:
+            LOG.warning("cec-ctl monitor exited immediately; pausing before retry")
+            await asyncio.sleep(10)
+
+
+async def main() -> None:
+    if MessageBus is not None:
+        try:
+            await monitor_cecd()
+            return
+        except Exception as exc:
+            LOG.warning(
+                "SteamOS cecd D-Bus unavailable (%s); "
+                "falling back to cec-ctl raw monitor" % exc
+            )
+    await monitor_raw()
 
 
 if __name__ == "__main__":

@@ -109,3 +109,13 @@ GAMESCOPE_RECOVER_ON_TV_POWER_ON=1
 GAMESCOPE_RECOVER_ON_CEC_ACTIVATION=1
 GAMESCOPE_TV_POWER_POLL_SECONDS=3
 GAMESCOPE_TV_POWER_TIMEOUT_SECONDS=2
+
+# Adapter OSD name (max 14 characters) used by steamos-cec-adapter-config.service
+# on distributions without Valve's cecd (CachyOS/Arch).
+CEC_OSD_NAME=CachyOS
+
+# CEC messages a television sends to mark a source active, parsed by the raw
+# cec-ctl monitor fallbacks when cecd is unavailable (Active Source : Set Stream
+# Path). Keep in sync with your TV; poll messages are ignored automatically.
+CEC_ACTIVE_SOURCE_OPCODES=0x2f:0x33
+

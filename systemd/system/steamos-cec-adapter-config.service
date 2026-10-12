@@ -1,0 +1,10 @@
+[Unit]
+Description=Configures the HDMI-CEC adapter (physical and logical address) on non-SteamOS systems
+Documentation=https://docs.kernel.org/admin-guide/media/cec.html
+Documentation=https://wiki.archlinux.org/title/HDMI-CEC
+
+[Service]
+Type=exec
+ExecStart=/var/lib/steamos-cec-toolkit/steamos-cec-adapter-config
+Restart=on-failure
+RestartSec=10

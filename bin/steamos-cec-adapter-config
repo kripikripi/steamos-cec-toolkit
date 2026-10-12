@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Root helper: configures the HDMI-CEC adapter with a physical address (read from
+# the display connector's EDID) and a logical address, for distributions without
+# Valve's cecd (CachyOS/Arch). On SteamOS cecd does this and the helper is not
+# installed. Runs in the foreground so the systemd service can restart it when
+# the kernel re-creates the CEC device node (udev SYSTEMD_WANTS triggers it too).
+set -euo pipefail
+
+CONFIG_FILE="${STEAMOS_CEC_CONFIG:-/etc/steamos-cec-toolkit.conf}"
+if [[ -r "$CONFIG_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+fi
+
+CEC_DEVICE="${CEC_DEVICE:-/dev/cec0}"
+OSD_NAME="${CEC_OSD_NAME:-CachyOS}"
+CONNECTOR_STATUS="${GAMESCOPE_CONNECTOR_STATUS:-/sys/class/drm/card0-DP-1/status}"
+
+if ! command -v cec-ctl >/dev/null 2>&1; then
+  echo "error: cec-ctl is required to configure the CEC adapter (Arch: install v4l-utils)." >&2
+  exit 1
+fi
+
+# The adapter may appear late in boot or after the session starts; the service
+# restarts on failure so a bounded wait keeps journal noise down.
+waited=0
+while [[ ! -c "$CEC_DEVICE" ]]; do
+  if (( waited >= 120 )); then
+    echo "warning: no CEC character device at $CEC_DEVICE; not configuring an adapter." >&2
+    exit 1
+  fi
+  sleep 2
+  waited=$((waited + 2))
+done
+
+find_edid_connector() {
+  local path status
+  # A DP-to-HDMI adapter tunnels CEC over the DisplayPort connector; prefer the
+  # configured gamescope connector, then any connected DP connector, then HDMI.
+  for status in "$CONNECTOR_STATUS" /sys/class/drm/card*/DP-*/status /sys/class/drm/card*/dp-*/status /sys/class/drm/card*/HDMI-*/status; do
+    [[ -e "$status" ]] || continue
+    if [[ "$(cat "$status" 2>/dev/null || true)" == "connected" ]]; then
+      printf '%s\n' "${status%/status}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+connector=""
+tries=0
+while [[ -z "$connector" ]]; do
+  connector="$(find_edid_connector || true)"
+  if [[ -z "$connector" ]]; then
+    tries=$((tries + 1))
+    if (( tries == 1 )); then
+      echo "info: no EDID-carrying connector found yet for $CEC_DEVICE; waiting for the display to connect."
+    fi
+    sleep 5
+  fi
+done
+
+# --phys-addr-from-edid-poll keeps the physical address current when the EDID
+# changes; it runs in the background so the allocated logical address can be
+# written back to the shared configuration.
+cec-ctl --device "$CEC_DEVICE" --skip-info --osd-name "$OSD_NAME" --playback --phys-addr-from-edid-poll "$connector/edid" &
+poll_pid=$!
+sleep 2
+
+allocated="$(cec-ctl -d "$CEC_DEVICE" -s --logical-address 2>/dev/null | grep -o '[0-9]\+' | head -n1 || true)"
+if [[ "$allocated" =~ ^([1-9]|1[0-4])$ ]] && grep -q '^CEC_PLAYBACK_LOGICAL_ADDRESS=' "$CONFIG_FILE" 2>/dev/null; then
+  configured="$(sed -n 's/^CEC_PLAYBACK_LOGICAL_ADDRESS=//p' "$CONFIG_FILE" | head -n1)"
+  if [[ "$configured" != "$allocated" ]]; then
+    echo "info: reconciling CEC_PLAYBACK_LOGICAL_ADDRESS (was ${configured:-unset}, adapter allocated $allocated) in $CONFIG_FILE"
+    sed -i "s|^CEC_PLAYBACK_LOGICAL_ADDRESS=.*|CEC_PLAYBACK_LOGICAL_ADDRESS=$allocated|" "$CONFIG_FILE"
+  fi
+fi
+
+wait "$poll_pid"

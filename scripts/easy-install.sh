@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/Twsts/steamos-cec-toolkit.git}"
+REPO_URL="${REPO_URL:-https://github.com/kripikripi/steamos-cec-toolkit.git}"
+REPO_REF="${REPO_REF:-kripikripi-cachyos-cec-support}"
 RELEASE_BASE_URL="${RELEASE_BASE_URL:-}"
 TOOLKIT_TARBALL_URL="${TOOLKIT_TARBALL_URL:-}"
 DECKY_PLUGIN_ZIP_URL="${DECKY_PLUGIN_ZIP_URL:-}"
@@ -190,7 +191,7 @@ if [[ -n "$TOOLKIT_TARBALL_URL" ]]; then
   tar -xzf "$WORKDIR/toolkit.tar.gz" -C "$WORKDIR" --strip-components=1
 else
   require_command git
-  git clone --depth 1 "$REPO_URL" "$WORKDIR"
+  git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$WORKDIR"
 fi
 cd "$WORKDIR"
 

@@ -47,12 +47,17 @@ The installer detects CachyOS and Arch from `/etc/os-release`. It does not write
 SteamOS atomic-update configuration on those systems, and it warns when optional
 Steam/Game Mode services are unavailable. The core command-line functionality
 only requires `cec-ctl`, PipeWire/WirePlumber, systemd user services, and a CEC
-character device such as `/dev/cec0`.
+character device such as `/dev/cec0`. On Arch `cec-ctl` ships in `v4l-utils`
+(there is no `cec-utils` Arch package), and PipeWire/WirePlumber come
+preinstalled on CachyOS. The kernel CEC subsystem is mainline Linux; DP-to-HDMI
+adapters tunnel CEC over the DisplayPort auxiliary channel, which works with
+AMDGPU, so the UGREEN adapter on a Radeon 9070 XT appears as `/dev/cec0` with
+its display port at `/sys/class/drm/card0-DP-1`.
 
 For the Radeon 9070 XT plus DP-to-HDMI adapter setup:
 
 ```bash
-sudo pacman -S cec-utils pipewire wireplumber python
+sudo pacman -S v4l-utils python
 REPO_URL=https://github.com/kripikripi/steamos-cec-toolkit.git bash <(curl -fsSL https://raw.githubusercontent.com/kripikripi/steamos-cec-toolkit/kripikripi-cachyos-cec-support/scripts/easy-install.sh)
 ```
 
@@ -60,6 +65,15 @@ The installer discovers `/dev/cec*` devices and generates a per-user
 `steamos-cec-external-volume.socket` instead of requiring SteamOS's
 `cec-audio-control.socket`. Decky and Gamescope features remain optional and are
 only useful when their dependencies are installed.
+Because CachyOS Handheld Edition has no SteamOS `cecd`, the installer also
+enables `steamos-cec-adapter-config.service`, which configures the adapter's
+physical and logical addresses on every boot from the connector's EDID (Valve's
+`cecd` normally does this on SteamOS), and the CEC monitor services fall back to
+raw `cec-ctl --monitor-all` parsing when `cecd`'s D-Bus interface is absent, so
+`dbus_next` is optional (`pip install dbus-next` enables the cecd path). CachyOS
+Handheld Edition has no Decky Loader, so use the CLI; Game Mode runs the
+`gamescope-session.service`/`gamescope-session.target` user units, which the
+recovery service matches.
 
 ## Screenshots
 
@@ -132,7 +146,9 @@ If you do not use Decky, the toolkit can still be managed from the command line:
 ~/.local/bin/steamos-cec-toolkitctl standby
 ```
 
-Development builds can be installed from `main` with:
+Development builds can be installed with (the fork keeps the CachyOS changes on
+the `kripikripi-cachyos-cec-support` branch; `easy-install.sh` clones it by
+default via `REPO_REF`):
 
 ```bash
 REPO_URL=https://github.com/kripikripi/steamos-cec-toolkit.git bash <(curl -fsSL https://raw.githubusercontent.com/kripikripi/steamos-cec-toolkit/kripikripi-cachyos-cec-support/scripts/easy-install.sh)

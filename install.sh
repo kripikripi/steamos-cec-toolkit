@@ -112,9 +112,12 @@ if [[ "$enable_external_volume" -eq 1 ]]; then
   require_command cec-ctl
 fi
 
-if [[ "$PLATFORM_ID" != "steamos" && "$PLATFORM_ID" != "cachyos" && "$PLATFORM_ID" != "arch" ]]; then
-  echo "warning: unrecognized distribution '$PLATFORM_ID'; continuing with generic Linux paths." >&2
-fi
+case "$PLATFORM_ID" in
+  steamos | cachyos | cachyos-* | arch | arch-*) ;;
+  *)
+    echo "warning: unrecognized distribution '$PLATFORM_ID'; continuing with generic Linux paths." >&2
+    ;;
+esac
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "Installing default config at $CONFIG_FILE"
@@ -191,6 +194,11 @@ sudo install -m 0755 "$PROJECT_DIR/bin/steamos-cec-usb-wake-apply" \
 sudo install -m 0755 "$PROJECT_DIR/bin/steamos-cec-usb-wake-control" \
   /var/lib/steamos-cec-toolkit/steamos-cec-usb-wake-control
 
+if cec_platform_generic_cec; then
+  sudo install -m 0755 "$PROJECT_DIR/bin/steamos-cec-adapter-config" \
+    /var/lib/steamos-cec-toolkit/steamos-cec-adapter-config
+fi
+
 echo "Installing systemd units and udev rules"
 sudo install -D -m 0644 "$PROJECT_DIR/systemd/system/steamos-cec-before-sleep.service" \
   /etc/systemd/system/steamos-cec-before-sleep.service
@@ -202,12 +210,23 @@ sudo install -D -m 0644 "$PROJECT_DIR/systemd/system/steamos-cec-resume-wake.ser
   /etc/systemd/system/steamos-cec-resume-wake.service
 sudo install -D -m 0644 "$PROJECT_DIR/udev/70-steamos-cec-toolkit.rules" \
   /etc/udev/rules.d/70-steamos-cec-toolkit.rules
+if cec_platform_generic_cec; then
+  sudo install -D -m 0644 "$PROJECT_DIR/systemd/system/steamos-cec-adapter-config.service" \
+    /etc/systemd/system/steamos-cec-adapter-config.service
+  sudo install -D -m 0644 "$PROJECT_DIR/udev/99-steamos-cec-adapter-config.rules" \
+    /etc/udev/rules.d/99-steamos-cec-adapter-config.rules
+fi
 if cec_is_steamos; then
   sudo install -D -m 0644 "$PROJECT_DIR/config/atomic-update-steamos-cec-toolkit.conf" \
     /etc/atomic-update.conf.d/steamos-cec-toolkit.conf
 else
   echo "Skipping SteamOS atomic-update configuration on $PLATFORM_ID."
   sudo rm -f /etc/atomic-update.conf.d/steamos-cec-toolkit.conf
+fi
+if cec_platform_generic_cec; then
+  sudo systemctl enable steamos-cec-adapter-config.service
+  sudo systemctl start steamos-cec-adapter-config.service ||
+    echo "warning: steamos-cec-adapter-config.service failed to start; inspect with journalctl -u steamos-cec-adapter-config." >&2
 fi
 
 echo "Configuring sudo permissions"
@@ -256,7 +275,7 @@ fi
 
 if [[ "$enable_tv_standby" -eq 1 || "$enable_input_away_suspend" -eq 1 || "$enable_gamescope_recovery" -eq 1 ]]; then
   if ! python3 -c 'import dbus_next' >/dev/null 2>&1; then
-    echo "warning: python module dbus_next is missing; CEC monitor services may fail" >&2
+    echo "warning: python module dbus_next is missing; CEC monitor services fall back to raw cec-ctl monitors." >&2
   fi
 fi
 

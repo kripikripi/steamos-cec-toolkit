@@ -1,0 +1,5 @@
+# Re-trigger adapter configuration when the kernel re-creates the CEC device
+# node (e.g. the DP-to-HDMI adapter is replugged). Installed on generic
+# platforms (CachyOS/Arch) only, alongside steamos-cec-adapter-config.service;
+# on SteamOS Valve's cecd configures the adapter instead.
+SUBSYSTEM=="cec", KERNEL=="cec[0-9]*", ACTION=="add", TAG+="systemd", ENV{SYSTEMD_WANTS}="steamos-cec-adapter-config.service"
