@@ -65,15 +65,52 @@ The installer discovers `/dev/cec*` devices and generates a per-user
 `steamos-cec-external-volume.socket` instead of requiring SteamOS's
 `cec-audio-control.socket`. Decky and Gamescope features remain optional and are
 only useful when their dependencies are installed.
+
+The Deck default ALSA card in the config (`alsa_card.pci-0000_03_00.1`, nick
+`HDA ATI HDMI`) does not exist on an AMD handheld, so run
+`steamos-cec-toolkitctl discover-audio` after installing: it now accepts any ALSA
+controller that owns an `hdmi-output-*` route (including the `hda-amd` cards an
+RX 9070 XT exposes over the DP-to-HDMI adapter) and rewrites
+`HDMI_ALSA_CARD_NAME`/`HDMI_ALSA_CARD_NICK` for you. If the adapter gets its own
+sound card, the card that owns the route wins.
 Because CachyOS Handheld Edition has no SteamOS `cecd`, the installer also
 enables `steamos-cec-adapter-config.service`, which configures the adapter's
 physical and logical addresses on every boot from the connector's EDID (Valve's
 `cecd` normally does this on SteamOS), and the CEC monitor services fall back to
 raw `cec-ctl --monitor-all` parsing when `cecd`'s D-Bus interface is absent, so
-`dbus_next` is optional (`pip install dbus-next` enables the cecd path). CachyOS
-Handheld Edition has no Decky Loader, so use the CLI; Game Mode runs the
-`gamescope-session.service`/`gamescope-session.target` user units, which the
-recovery service matches.
+`dbus_next` is optional (`pip install dbus-next` enables the cecd path). Game Mode
+runs the `gamescope-session.service`/`gamescope-session.target` user units, which
+the recovery service matches.
+
+### Decky plugin on CachyOS / Arch
+
+The plugin UI is a thin wrapper over `~/.local/bin/steamos-cec-toolkitctl`; it
+issues no SteamOS-only commands, so it works unchanged wherever Decky Loader runs.
+CachyOS Handheld Edition supports Decky Loader (install it if your image does not
+ship it); plain Arch does not, and there the toolkit is managed from the command
+line instead.
+
+- `scripts/easy-install.sh` installs the plugin into `$HOME/homebrew/plugins/steamos-cec-toolkit`
+  from the `decky/` directory in this repository (`plugin.json`, `package.json`, `main.py`,
+  `dist/index.js`), owned by `root` and world-readable, which is the layout Decky
+  Loader expects (`<plugins>/<name>/plugin.json` plus `<plugins>/<name>/main.py`).
+  `install.sh` on its own does not install the plugin.
+- `decky/dist/index.js` is prebuilt and committed, so the plugin needs no Node
+  toolchain on the device. Rebuild it with `scripts/build-release-assets.sh` only if you
+  change `decky/src/index.tsx`.
+- The plugin shells out to the helper in the home of the user Decky Loader runs as,
+  so run the installer as that Game Mode user: that home must contain
+  `.local/bin/steamos-cec-toolkitctl`, and the `NOPASSWD` sudo rules in
+  `/etc/sudoers.d/zz-steamos-cec-toolkit-volume` are generated for the same account. The
+  plugin reports `Missing` for a helper or sudoers rule when that account is not the one
+  the installer configured.
+- Plugin feature toggles cover the user services plus the `power-standby-control`
+  and `usb-wake-control` system helpers. `steamos-cec-before-sleep.service` is selected
+  by `install.sh --enable-before-sleep` and is not offered in the plugin; the standby
+  behaviour it provides is already built into the suspend/resume scripts, so leaving it
+  off loses nothing on a handheld that does not suspend over HDMI-CEC.
+- Restart Decky Loader (or Steam) after installing the plugin; Game Mode can keep showing
+  an older bundle otherwise.
 
 ## Screenshots
 

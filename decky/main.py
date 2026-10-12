@@ -9,10 +9,28 @@ import decky
 
 class Plugin:
     def __init__(self):
-        self._home = Path(os.environ.get("SUDO_USER_HOME", "/home/deck"))
-        if not self._home.exists():
-            self._home = Path.home()
+        self._home = self.resolve_home()
         self._ctl_path = self._home / ".local" / "bin" / "steamos-cec-toolkitctl"
+
+    @staticmethod
+    def resolve_home() -> Path:
+        # The toolkit helper lives in the home of the user the installer ran as,
+        # which is not necessarily /home/deck on Arch-derived systems (CachyOS
+        # Handheld Edition, plain Arch). Prefer a home that actually contains the
+        # helper, then fall back to the loader user's home.
+        candidates = []
+        for key in ("SUDO_USER_HOME", "HOME"):
+            value = os.environ.get(key, "")
+            if value:
+                candidates.append(Path(value))
+        candidates.append(Path.home())
+        for candidate in candidates:
+            if (candidate / ".local/bin/steamos-cec-toolkitctl").exists():
+                return candidate
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return Path.home()
 
     async def _run_ctl(self, *args: str) -> dict:
         command = [str(self._ctl_path), *args]
