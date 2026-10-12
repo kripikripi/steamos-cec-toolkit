@@ -7,9 +7,14 @@ if [[ -r "$CONFIG_FILE" ]]; then
   source "$CONFIG_FILE"
 fi
 
-if [[ "${1:-}" == "post" ]]; then
-  exit 0
-fi
+# systemd-sleep invokes this hook twice: "start" before suspend and "stop" after
+# resume. The sleep.target service unit runs the same script with no arguments
+# before sleep, so anything that is not the pre-suspend invocation exits here;
+# otherwise the standby sequence would run again when the system wakes.
+case "${1:-}" in
+  start | "") ;;
+  *) exit 0 ;;
+esac
 
 STEAMOS_CEC_USER="${STEAMOS_CEC_USER:-deck}"
 STEAMOS_CEC_UID="$(id -u "$STEAMOS_CEC_USER")"
