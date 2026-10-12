@@ -160,7 +160,7 @@ fi
 
 # The shipped conf example once left the three-line audio note uncommented, so it
 # landed in /etc verbatim. Comment those lines back if a user kept that config.
-if grep -Eq '^The Deck default below is the SteamOS Deck card id|^RVAPX 470 / RX 9070 XT class GPUs run|^for the GPU you use from' "$CONFIG_FILE" 2>/dev/null; then
+if grep -Eq '^The Deck default below is the SteamOS Deck card id|^RVAPX 470 / RX 9070 XT class GPUs|^for the GPU you use from' "$CONFIG_FILE" 2>/dev/null; then
   echo "Repairing un-commented audio note in $CONFIG_FILE"
   sudo sed -i \
     -e 's|^\(The Deck default below is the SteamOS Deck card id.*\)$|# \1|' \
