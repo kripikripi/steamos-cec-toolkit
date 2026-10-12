@@ -39,9 +39,10 @@ CEC_SIMPLINK_VENDOR_ID=0x00e091
 #   wpctl status
 #   pw-cli ls Device
 #   steamos-cec-toolkitctl discover-audio   (writes the detected card into the config)
-The Deck default below is the SteamOS Deck card id; on the CachyOS handheld (AMD
-RVAPX 470 / RX 9070 XT class GPUs) run discover-audio, or copy the alsa_card line
-for the GPU you use from `pw-cli ls Device`.
+#
+# The Deck default below is the SteamOS Deck card id; on the CachyOS handheld (AMD
+# RVAPX 470 / RX 9070 XT class GPUs) run discover-audio, or copy the alsa_card line
+# for the GPU you use from `pw-cli ls Device`.
 HDMI_ALSA_CARD_NAME=alsa_card.pci-0000_03_00.1
 HDMI_ALSA_CARD_NICK="HDA ATI HDMI"
 EXTERNAL_VOLUME_DEVICE=HDMI

@@ -119,6 +119,19 @@ case "$PLATFORM_ID" in
     ;;
 esac
 
+# install.sh sources the config below, so one stray (uncommented) prose line in a
+# hand-edited config aborts the whole run mid-install, after files are already on
+# disk, with a bare shell syntax error. Check the syntax before writing anything.
+require_valid_config() {
+  local file="$1" errors
+  if ! errors="$(bash -n "$file" 2>&1)"; then
+    printf 'error: %s is not valid shell syntax (install.sh sources it):\n' "$file" >&2
+    printf '%s\n' "$errors" >&2
+    printf 'Comment the offending lines with "#" or quote values containing spaces, then re-run install.sh.\n' >&2
+    exit 1
+  fi
+}
+
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "Installing default config at $CONFIG_FILE"
   sudo install -D -m 0644 "$PROJECT_DIR/config/steamos-cec-toolkit.conf.example" "$CONFIG_FILE"
@@ -145,6 +158,19 @@ if grep -qx 'HDMI_ALSA_CARD_NICK=HDA ATI HDMI' "$CONFIG_FILE" 2>/dev/null; then
   sudo sed -i 's/^HDMI_ALSA_CARD_NICK=HDA ATI HDMI$/HDMI_ALSA_CARD_NICK="HDA ATI HDMI"/' "$CONFIG_FILE"
 fi
 
+# The shipped conf example once left the three-line audio note uncommented, so it
+# landed in /etc verbatim. Comment those lines back if a user kept that config.
+if grep -qx '^The Deck default below is the SteamOS Deck card id' "$CONFIG_FILE" 2>/dev/null; then
+  echo "Repairing un-commented audio note in $CONFIG_FILE"
+  sudo sed -i \
+    -e 's|^\(The Deck default below is the SteamOS Deck card id.*\)$|# \1|' \
+    -e 's|^\(RVAPX 470 / RX 9070 XT class GPUs.*\)$|# \1|' \
+    -e 's|^\(for the GPU you use from.*\)$|# \1|' \
+    "$CONFIG_FILE"
+fi
+
+require_valid_config "$CONFIG_FILE"
+
 install -d "$HOME/.local/bin"
 install -d "$HOME/.local/share/steamos-cec-toolkit"
 install -m 0644 "$PROJECT_DIR/VERSION" "$HOME/.local/share/steamos-cec-toolkit/VERSION"
@@ -168,6 +194,7 @@ fi
 source "$CONFIG_FILE"
 USER_CONFIG_FILE="$HOME/.config/steamos-cec-toolkit/config.conf"
 if [[ -f "$USER_CONFIG_FILE" ]]; then
+  require_valid_config "$USER_CONFIG_FILE"
   # shellcheck disable=SC1090
   source "$USER_CONFIG_FILE"
 fi

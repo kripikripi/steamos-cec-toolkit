@@ -26,6 +26,13 @@ require_command npm
 require_command tar
 require_command zip
 
+# Gate the release: install.sh sources the conf, so an uncommented prose line in
+# the example ships straight into /etc and aborts the install on the target.
+bash -n "$PROJECT_DIR/config/steamos-cec-toolkit.conf.example"
+bash -n "$PROJECT_DIR/install.sh"
+bash -n "$PROJECT_DIR/uninstall.sh"
+bash -n "$PROJECT_DIR/scripts/easy-install.sh"
+
 echo "Building SteamOS CEC Toolkit release assets for $VERSION"
 
 rm -rf "$RELEASE_DIR"

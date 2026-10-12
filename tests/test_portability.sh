@@ -3,7 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
-bash -n "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/bin/steamos-cec-permissions-apply"
+bash -n "$ROOT/install.sh"
+bash -n "$ROOT/uninstall.sh"
+bash -n "$ROOT/bin/steamos-cec-permissions-apply"
 python3 -m py_compile "$ROOT/bin/steamos-cec-toolkitctl" "$ROOT/bin/steamos-cec-external-volume"
 
 grep -q 'Skipping SteamOS atomic-update configuration' "$ROOT/install.sh"
@@ -14,7 +16,8 @@ if grep -q 'cec-audio-control.socket' "$ROOT/install.sh"; then
   exit 1
 fi
 
-bash -n "$ROOT/scripts/easy-install.sh" "$ROOT/bin/steamos-cec-adapter-config"
+bash -n "$ROOT/scripts/easy-install.sh"
+bash -n "$ROOT/bin/steamos-cec-adapter-config"
 python3 -m py_compile \
   "$ROOT/bin/steamos-cec-tv-standby-suspend" \
   "$ROOT/bin/steamos-cec-input-away-suspend" \
@@ -36,6 +39,9 @@ grep -q 'monitor-all' "$ROOT/bin/steamos-cec-input-away-suspend"
 grep -q 'monitor-all' "$ROOT/bin/steamos-cec-tv-standby-suspend"
 grep -q 'CEC_ACTIVE_SOURCE_OPCODES' "$ROOT/bin/steamos-cec-input-away-suspend"
 grep -q 'CEC_ACTIVE_SOURCE_OPCODES' "$ROOT/config/steamos-cec-toolkit.conf.example"
+# install.sh and the shell helpers source this file, so an uncommented prose line
+# ships straight into /etc and aborts the install; reject that at release time.
+bash -n "$ROOT/config/steamos-cec-toolkit.conf.example"
 
 for f in steamos-cec-before-sleep steamos-cec-debug-monitor steamos-cec-volume-raw steamos-cec-resume-wake;
   do

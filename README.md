@@ -523,6 +523,11 @@ common runtime choices. For system defaults, edit:
 sudoedit /etc/steamos-cec-toolkit.conf
 ```
 
+The config is sourced by the installer and by the shell helpers, so every line must be
+a comment (`#`) or `KEY=value`; quote any value containing spaces. `install.sh` checks
+that syntax before it writes anything and stops with the offending line quoted, so a
+stray note in the file cannot abort the install halfway through.
+
 Important defaults:
 
 ```bash
