@@ -163,6 +163,15 @@ REPO_URL=https://github.com/kripikripi/steamos-cec-toolkit.git bash <(curl -fsSL
 - A TV/AVR/soundbar HDMI-CEC chain.
 - `git`, `curl`, `sudo`, and `systemctl` available on the SteamOS desktop
   session.
+- On non-SteamOS systems (e.g. CachyOS Handheld Edition, Arch) the toolkit uses
+  `cec-ctl` from `v4l-utils` (installed by `install.sh`) instead of Valve's
+  `cecd`, plus the kernel CEC driver (`/dev/cec0`). With a DP-to-HDMI adapter the
+  kernel exposes CEC over the DisplayPort connector; the installer's adapter
+  helper points the adapter's physical address at that connector's EDID
+  automatically.
+- Optional: Python `dbus_next` for D-Bus-based CEC integrations; without it the
+  CEC monitor services fall back to raw `cec-ctl` monitors and the core
+  suspend/resume, volume, wake, and standby features still work.
 - `unzip` if you install the Decky plugin from release assets.
 
 ## Hardware This Targets

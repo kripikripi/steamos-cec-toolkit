@@ -38,6 +38,10 @@ CEC_SIMPLINK_VENDOR_ID=0x00e091
 # PipeWire/WirePlumber card match. Find with:
 #   wpctl status
 #   pw-cli ls Device
+#   steamos-cec-toolkitctl discover-audio   (writes the detected card into the config)
+The Deck default below is the SteamOS Deck card id; on the CachyOS handheld (AMD
+RVAPX 470 / RX 9070 XT class GPUs) run discover-audio, or copy the alsa_card line
+for the GPU you use from `pw-cli ls Device`.
 HDMI_ALSA_CARD_NAME=alsa_card.pci-0000_03_00.1
 HDMI_ALSA_CARD_NICK="HDA ATI HDMI"
 EXTERNAL_VOLUME_DEVICE=HDMI
@@ -99,6 +103,10 @@ CEC_SLEEP_TV_ACTION=standby
 INPUT_INACTIVE_SUSPEND_DELAY_SECONDS=60
 
 # Optional Gamescope recovery service after CEC source activation.
+# Valve Deck default: /sys/class/drm/card0-DP-1/status. On an amdgpu handheld
+# (CachyOS Handheld Edition) find the connected connector with
+# `readlink -f /sys/class/drm/*` and set it, or leave unset: recovery then
+# fires purely on CEC source activation.
 GAMESCOPE_CONNECTOR_STATUS=/sys/class/drm/card0-DP-1/status
 GAMESCOPE_RECOVER_AFTER_RESUME=1
 GAMESCOPE_RECOVERY_DELAY_SECONDS=3
