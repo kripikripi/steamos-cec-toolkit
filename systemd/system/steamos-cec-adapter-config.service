@@ -8,3 +8,6 @@ Type=exec
 ExecStart=/var/lib/steamos-cec-toolkit/steamos-cec-adapter-config
 Restart=on-failure
 RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

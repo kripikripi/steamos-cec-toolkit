@@ -428,35 +428,57 @@ def discover_audio() -> dict[str, Any]:
     cards: list[dict[str, str]] = []
     routes: list[str] = []
     route_pattern = re.compile(r"hdmi-output-\d+")
-    for item in objects if isinstance(objects, list) else []:
-        props = object_props(item)
-        values = [str(value) for value in props.values() if isinstance(value, (str, int, float))]
-        text = " ".join(values).lower()
-        name = str(props.get("device.name", ""))
-        nick = str(props.get("device.nick", ""))
-        description = str(props.get("device.description", ""))
-        media_class = str(props.get("media.class", ""))
+    if isinstance(objects, list):
+        for item in objects:
+            props = object_props(item)
+            values = [str(value) for value in props.values() if isinstance(value, (str, int, float))]
+            joined = " ".join(values)
+            parent = str(props.get("device.name", ""))
+            if parent.startswith("alsa_card.") and route_pattern.search(joined):
+                routes_matches = set(route_pattern.findall(joined))
+                if routes_matches:
+                    routes.extend(route for route in routes_matches if route not in routes)
 
-        for value in values:
-            for route in route_pattern.findall(value):
-                if route not in routes:
-                    routes.append(route)
+    # A card that owns an hdmi-output-* route is HDMI-capable even when its nick
+    # (e.g. "HDA AMD AMD RX 9070 XT") does not mention HDMI explicitly.
+    hdmi_card_names: set[str] = set()
+    if isinstance(objects, list):
+        for item in objects:
+            props = object_props(item)
+            values = [str(value) for value in props.values() if isinstance(value, (str, int, float))]
+            joined = " ".join(values)
+            if not route_pattern.search(joined):
+                continue
+            for value in values:
+                match = re.search(r"alsa_card\.[A-Za-z0-9_.\-]+", value)
+                if match:
+                    hdmi_card_names.add(match.group(0))
 
-        is_alsa_card = name.startswith("alsa_card.")
-        is_audio_device = media_class in {"Audio/Device", ""} and is_alsa_card
-        looks_hdmi = any(
-            term in text
-            for term in ("hdmi", "displayport", "display port", "hda ati", "hda nvidia", "hda intel")
-        )
-        if is_audio_device and looks_hdmi:
-            cards.append(
-                {
-                    "name": name,
-                    "nick": nick,
-                    "description": description,
-                    "label": audio_label(name, nick, description),
-                }
+    if isinstance(objects, list):
+        for item in objects:
+            props = object_props(item)
+            values = [str(value) for value in props.values() if isinstance(value, (str, int, float))]
+            text = " ".join(values).lower()
+            name = str(props.get("device.name", ""))
+            nick = str(props.get("device.nick", ""))
+            description = str(props.get("device.description", ""))
+            media_class = str(props.get("media.class", ""))
+
+            is_alsa_card = name.startswith("alsa_card.")
+            is_audio_device = media_class in {"Audio/Device", ""} and is_alsa_card
+            looks_hdmi = any(
+                term in text
+                for term in ("hdmi", "displayport", "display port", "hda ati", "hda nvidia", "hda intel", "hda amd")
             )
+            if is_audio_device and (looks_hdmi or name in hdmi_card_names):
+                cards.append(
+                    {
+                        "name": name,
+                        "nick": nick,
+                        "description": description,
+                        "label": audio_label(name, nick, description),
+                    }
+                )
 
     if not routes:
         routes = [fallback["EXTERNAL_VOLUME_ROUTE"]]
