@@ -37,7 +37,13 @@ find_edid_connector() {
   local path status
   # A DP-to-HDMI adapter tunnels CEC over the DisplayPort connector; prefer the
   # configured gamescope connector, then any connected DP connector, then HDMI.
-  for status in "$CONNECTOR_STATUS" /sys/class/drm/card*/DP-*/status /sys/class/drm/card*/dp-*/status /sys/class/drm/card*/HDMI-*/status; do
+  local -a status_paths=(
+    "$CONNECTOR_STATUS"
+    /sys/class/drm/card*-DP-*/status
+    /sys/class/drm/card*-dp-*/status
+    /sys/class/drm/card*-HDMI-*/status
+  )
+  for status in "${status_paths[@]}"; do
     [[ -e "$status" ]] || continue
     if [[ "$(cat "$status" 2>/dev/null || true)" == "connected" ]]; then
       printf '%s\n' "${status%/status}"

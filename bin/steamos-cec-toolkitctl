@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import re
@@ -234,6 +235,17 @@ def system_service_state(unit: str) -> dict[str, Any]:
         "is_active": active["returncode"] == 0,
         "is_enabled": enabled["returncode"] == 0,
     }
+
+
+def sudoers_rule_available() -> bool:
+    if SUDOERS_FILE.exists():
+        return True
+    configured_user = read_config().get("STEAMOS_CEC_USER", "")
+    target_user = configured_user or getpass.getuser()
+    result = run(["sudo", "-n", "-l", "-U", target_user], timeout=5)
+    if not result["ok"]:
+        return False
+    return str(ROOT_HELPER) in result["stdout"]
 
 
 def cec_label(logical: str, device_type: str, osd_name: str) -> str:
@@ -753,7 +765,7 @@ def status() -> dict[str, Any]:
         "cec_permissions_helper_exists": CEC_PERMISSIONS_HELPER.exists(),
         "resume_wake_helper_exists": RESUME_WAKE_HELPER.exists(),
         "resume_wake_unit_exists": RESUME_WAKE_UNIT.exists(),
-        "sudoers_exists": SUDOERS_FILE.exists(),
+        "sudoers_exists": sudoers_rule_available(),
         "cec_device": cec_device_state(config),
         "external_volume_script_exists": EXTERNAL_VOLUME_SCRIPT.exists(),
         "volume_script_exists": VOLUME_SCRIPT.exists(),
