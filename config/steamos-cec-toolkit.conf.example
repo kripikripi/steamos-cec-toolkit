@@ -85,7 +85,7 @@ CEC_LOGICAL_ADDRESS_WAIT_SECONDS=12
 USB_WAKE_MATCH="bluetooth|steam controller|xbox|playstation|dualsense|dualshock|8bitdo|nintendo|shield|santroller|flydigi|vader"
 USB_WAKE_EXCLUDE="hub|host controller|keyboard|mouse|touchpad|aura|audio"
 USB_WAKE_USB_IDS="8087:0032 045e:028e"
-USB_WAKE_BLUETOOTH_CLASS=1
+USB_WAKE_BLUETOOTH_CLASS=0
 
 # Optional TV standby suspend service.
 TV_LOGICAL_ADDRESS=0
