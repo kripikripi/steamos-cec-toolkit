@@ -143,6 +143,20 @@ for wakeup in /sys/bus/usb/devices/*/power/wakeup; do
     "$(json_escape "$after")")")
 done
 
+# Some USB HID receivers expose no power/wakeup file themselves. Match them by
+# USB ID and enable the wake-capable hub/controller parents instead.
+for device_dir in /sys/bus/usb/devices/*; do
+  [[ -r "$device_dir/idVendor" && -r "$device_dir/idProduct" ]] || continue
+  usb_id="$(cat "$device_dir/idVendor")":"$(cat "$device_dir/idProduct")"
+  if [[ ! " $USB_WAKE_BUILTIN_USB_IDS " =~ " $usb_id " ]]; then
+    continue
+  fi
+  matched=$((matched + 1))
+  if [[ "$target_state" == "enabled" ]]; then
+    enable_wakeup_path "$device_dir"
+  fi
+done
+
 printf '{"ok":true,"matched":%d,"changed":%d,"devices":[' "$matched" "$changed"
 separator=""
 for item in "${items[@]}"; do
