@@ -44,6 +44,12 @@ CONFIG = read_config(os.environ.get("STEAMOS_CEC_CONFIG", DEFAULT_CONFIG))
 TV_LOGICAL_ADDRESS = int(CONFIG.get("TV_LOGICAL_ADDRESS", "0"), 0)
 CEC_STANDBY_OPCODE = int(CONFIG.get("CEC_STANDBY_OPCODE", "0x36"), 0)
 CEC_DEVICE = CONFIG.get("CEC_DEVICE", "/dev/cec0")
+CEC_MONITOR_COMMAND = (
+    "sudo",
+    "-n",
+    "/var/lib/steamos-cec-toolkit/steamos-cec-debug-monitor",
+    "5",
+)
 
 MONITOR_HEADER_RE = re.compile(
     r"^(?:Received from|Transmitted by)\b.*\((\d+) to (\d+)\):"
@@ -111,13 +117,7 @@ async def monitor_raw() -> None:
             continue
         started = time.time()
         process = await asyncio.create_subprocess_exec(
-            "cec-ctl",
-            "--device",
-            CEC_DEVICE,
-            "-s",
-            "--monitor-all",
-            "--ignore=all,poll",
-            "--show-raw",
+            *CEC_MONITOR_COMMAND,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )

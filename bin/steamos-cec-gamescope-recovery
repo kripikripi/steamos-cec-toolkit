@@ -93,6 +93,12 @@ CEC_ACTIVE_SOURCE_OPCODES = {
     if token
 }
 CEC_PHYSICAL_ADDRESS = CONFIG.get("CEC_PHYSICAL_ADDRESS", "")
+CEC_MONITOR_COMMAND = (
+    "sudo",
+    "-n",
+    "/var/lib/steamos-cec-toolkit/steamos-cec-debug-monitor",
+    "5",
+)
 
 MONITOR_HEADER_RE = re.compile(
     r"(?:Received from|Transmitted by)\b.*\((\d+) to (\d+)\):"
@@ -205,7 +211,7 @@ def connector_status() -> str:
         pass
     for path in sorted(glob.iglob("/sys/class/drm/card*-DP-*/status")):
         try:
-            status = path.read_text().strip()
+            status = Path(path).read_text().strip()
         except OSError:
             continue
         if status == "connected":
@@ -313,13 +319,7 @@ async def monitor_cec_raw(state: dict[str, object]) -> None:
         )
         started = time.time()
         process = await asyncio.create_subprocess_exec(
-            "cec-ctl",
-            "--device",
-            CEC_DEVICE,
-            "-s",
-            "--monitor-all",
-            "--ignore=all,poll",
-            "--show-raw",
+            *CEC_MONITOR_COMMAND,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -448,6 +448,7 @@ async def monitor_sleep(state: dict[str, object]) -> None:
     except Exception as error:
         LOG.warning("Cannot monitor system resume: %s", error)
         await asyncio.get_running_loop().create_future()
+        return
 
     def prepare_for_sleep(sleeping):
         LOG.info("PrepareForSleep sleeping=%s", sleeping)
