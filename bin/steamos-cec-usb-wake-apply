@@ -7,12 +7,13 @@ if [[ -r "$CONFIG_FILE" ]]; then
   source "$CONFIG_FILE"
 fi
 
-USB_WAKE_MATCH="${USB_WAKE_MATCH:-bluetooth|steam controller|xbox|playstation|dualsense|dualshock|8bitdo|nintendo|shield|santroller}"
+USB_WAKE_MATCH="${USB_WAKE_MATCH:-bluetooth|steam controller|xbox|playstation|dualsense|dualshock|8bitdo|nintendo|shield|santroller|flydigi|vader}"
 USB_WAKE_EXCLUDE="${USB_WAKE_EXCLUDE:-hub|host controller|keyboard|mouse|touchpad|aura|audio}"
 USB_WAKE_USB_IDS="${USB_WAKE_USB_IDS:-8087:0032}"
 USB_WAKE_BLUETOOTH_CLASS="${USB_WAKE_BLUETOOTH_CLASS:-1}"
 USB_WAKE_STATE_FILE="${USB_WAKE_STATE_FILE:-/var/lib/steamos-cec-toolkit/usb-wake-state}"
 USB_WAKE_STATE="${1:-on}"
+USB_WAKE_MATCH="${USB_WAKE_MATCH}|controller|flydigi|vader"
 
 case "$USB_WAKE_STATE" in
   on) target_state="enabled" ;;
@@ -38,6 +39,7 @@ recorded_paths=()
 
 enable_wakeup_path() {
   local path="$1" wakeup before after
+  path="$(realpath "$path" 2>/dev/null || printf '%s' "$path")"
   while [[ "$path" == /sys/* && "$path" != /sys ]]; do
     wakeup="$path/power/wakeup"
     if [[ -e "$wakeup" && ! " ${recorded_paths[*]} " =~ " $path " ]]; then
