@@ -134,11 +134,26 @@ class VolumeWorker:
     def __init__(self, command: str) -> None:
         self.command = command
         self.actions: queue.Queue[str] = queue.Queue()
+        self.volume = 50.0
+        self.volume_lock = threading.Lock()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
     def enqueue(self, action: str) -> None:
         self.actions.put(action)
+
+    def set_volume(self, target: float) -> None:
+        target = max(0.0, min(100.0, target))
+        with self.volume_lock:
+            delta = int(round(target - self.volume))
+            self.volume = target
+        action = "up" if delta > 0 else "down"
+        for _ in range(abs(delta)):
+            self.enqueue(action)
+
+    def get_volume(self) -> float:
+        with self.volume_lock:
+            return self.volume
 
     def _run(self) -> None:
         while True:
@@ -182,14 +197,14 @@ def service_info() -> dict[str, Any]:
 def capabilities(route: str) -> dict[str, Any]:
     return {
         "parameters": {
-            "readVolume": False,
+            "readVolume": True,
             "readBalance": False,
             "volumeRange": {
                 "min": 0.0,
                 "max": 100.0,
                 "step": 1.0,
             },
-            "writeVolumeAbsolute": False,
+            "writeVolumeAbsolute": True,
             "writeVolumeRelative": True,
             "writeVolumeRelativeStep": {
                 "min": 1.0,
@@ -234,11 +249,23 @@ class Server:
             return
 
         if method == "org.pipewire.ExternalVolume.ReadVolume":
-            send_error(conn, "org.pipewire.ExternalVolume.OperationUnsupported")
+            send_reply(conn, {"parameters": {"volume": self.worker.get_volume()}})
             return
 
         if method == "org.pipewire.ExternalVolume.WriteVolumeAbsolute":
-            send_error(conn, "org.pipewire.ExternalVolume.OperationUnsupported")
+            try:
+                volume = float(params.get("volume"))
+            except (TypeError, ValueError):
+                send_error(conn, "org.varlink.service.InvalidParameter")
+                return
+            # Accept both PipeWire's 0..100 range and clients that send 0..1.
+            if 0.0 <= volume <= 1.0:
+                volume *= 100.0
+            if not 0.0 <= volume <= 100.0:
+                send_error(conn, "org.varlink.service.InvalidParameter")
+                return
+            self.worker.set_volume(volume)
+            send_reply(conn, {"parameters": {}})
             return
 
         if method == "org.pipewire.ExternalVolume.WriteVolumeRelative":
