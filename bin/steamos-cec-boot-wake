@@ -225,15 +225,22 @@ def main() -> int:
     if delay > 0:
         time.sleep(delay)
 
+    has_cecd = cecd_available()
+    if not has_cecd:
+        LOG.info("SteamOS cecd is unavailable; using raw CEC wake/input activation")
+
     for attempt in range(1, attempts + 1):
         if source_is_active():
             LOG.info("SteamOS HDMI-CEC source reports active before attempt %d; sending wake/input anyway", attempt)
         raw_wake()
-        result = wake_source()
-        if result.returncode != 0 and cecd_available():
-            LOG.warning("Boot wake attempt %d failed: %s", attempt, result.stdout.strip())
-        else:
+        if not has_cecd:
             LOG.info("Sent boot wake/input activation attempt %d", attempt)
+        else:
+            result = wake_source()
+            if result.returncode != 0:
+                LOG.warning("Boot wake attempt %d failed: %s", attempt, result.stdout.strip())
+            else:
+                LOG.info("Sent boot wake/input activation attempt %d", attempt)
 
         if attempt < attempts:
             time.sleep(retry_seconds)
