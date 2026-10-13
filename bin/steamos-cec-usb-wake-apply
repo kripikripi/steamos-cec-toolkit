@@ -10,6 +10,7 @@ fi
 USB_WAKE_MATCH="${USB_WAKE_MATCH:-bluetooth|steam controller|xbox|playstation|dualsense|dualshock|8bitdo|nintendo|shield|santroller|flydigi|vader}"
 USB_WAKE_EXCLUDE="${USB_WAKE_EXCLUDE:-hub|host controller|keyboard|mouse|touchpad|aura|audio}"
 USB_WAKE_USB_IDS="${USB_WAKE_USB_IDS:-8087:0032}"
+USB_WAKE_BUILTIN_USB_IDS="045e:028e"
 USB_WAKE_BLUETOOTH_CLASS="${USB_WAKE_BLUETOOTH_CLASS:-1}"
 USB_WAKE_STATE_FILE="${USB_WAKE_STATE_FILE:-/var/lib/steamos-cec-toolkit/usb-wake-state}"
 USB_WAKE_STATE="${1:-on}"
@@ -117,7 +118,10 @@ for wakeup in /sys/bus/usb/devices/*/power/wakeup; do
     bluetooth_class_match=1
   fi
 
-  if [[ "$bluetooth_class_match" -ne 1 && ! " $USB_WAKE_USB_IDS " =~ " $usb_id " && ! "$label_lower" =~ $USB_WAKE_MATCH ]]; then
+  if [[ "$bluetooth_class_match" -ne 1 &&
+    ! " $USB_WAKE_USB_IDS " =~ " $usb_id " &&
+    ! " $USB_WAKE_BUILTIN_USB_IDS " =~ " $usb_id " &&
+    ! "$label_lower" =~ $USB_WAKE_MATCH ]]; then
     continue
   fi
   if [[ "$label_lower" =~ $USB_WAKE_EXCLUDE ]]; then
