@@ -214,7 +214,10 @@ send_wake_attempt() {
   send_raw -f "$source" -t "$TV_LOGICAL_ADDRESS" --custom-command cmd=0x0d || failures=$((failures + 1))
   sleep 0.25
 
-  cecd_wake || failures=$((failures + 1))
+  # CachyOS does not provide SteamOS cecd; raw CEC wake above is authoritative.
+  if ! cecd_wake && user_busctl status com.steampowered.CecDaemon1 >/dev/null 2>&1; then
+    failures=$((failures + 1))
+  fi
   sleep 1
 
   if [[ -n "$payload" ]]; then

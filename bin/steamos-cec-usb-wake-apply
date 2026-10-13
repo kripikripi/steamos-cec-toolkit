@@ -34,6 +34,31 @@ json_escape() {
 matched=0
 changed=0
 items=()
+recorded_paths=()
+
+enable_wakeup_path() {
+  local path="$1" wakeup before after
+  while [[ "$path" == /sys/* && "$path" != /sys ]]; do
+    wakeup="$path/power/wakeup"
+    if [[ -e "$wakeup" && ! " ${recorded_paths[*]} " =~ " $path " ]]; then
+      recorded_paths+=("$path")
+      before="$(cat "$wakeup" 2>/dev/null || true)"
+      after="$before"
+      printf '%s\t%s\n' "$path" "$before" >> "$USB_WAKE_STATE_FILE"
+      if [[ "$before" != enabled ]]; then
+        printf 'enabled\n' > "$wakeup"
+        after="$(cat "$wakeup" 2>/dev/null || true)"
+        changed=$((changed + 1))
+      fi
+      items+=("$(printf '{"path":%s,"label":%s,"before":%s,"after":%s}' \
+        "$(json_escape "$path")" \
+        "$(json_escape "wake path")" \
+        "$(json_escape "$before")" \
+        "$(json_escape "$after")")")
+    fi
+    path="$(dirname "$path")"
+  done
+}
 
 if [[ "$target_state" == "restore" ]]; then
   if [[ -r "$USB_WAKE_STATE_FILE" ]]; then
@@ -101,12 +126,8 @@ for wakeup in /sys/bus/usb/devices/*/power/wakeup; do
   before="$(cat "$wakeup" 2>/dev/null || true)"
   after="$before"
   if [[ "$target_state" == "enabled" ]]; then
-    printf '%s\t%s\n' "$device_dir" "$before" >> "$USB_WAKE_STATE_FILE"
-  fi
-  if [[ -n "$target_state" && "$before" != "$target_state" ]]; then
-    printf '%s\n' "$target_state" > "$wakeup"
-    after="$(cat "$wakeup" 2>/dev/null || true)"
-    changed=$((changed + 1))
+    enable_wakeup_path "$device_dir"
+    continue
   fi
 
   items+=("$(printf '{"path":%s,"label":%s,"before":%s,"after":%s}' \
