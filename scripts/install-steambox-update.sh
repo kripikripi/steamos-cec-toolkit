@@ -81,6 +81,8 @@ do
 done
 
 for user_unit in \
+  steamos-cec-external-volume.service \
+  steamos-cec-external-volume.socket \
   steamos-cec-boot-wake.service \
   steamos-cec-steam-button.service \
   steamos-cec-tv-standby-suspend.service \
@@ -167,6 +169,7 @@ if src="$(source_file "systemd/system/steamos-cec-resume-wake.service")"; then
   install -m 0644 "$src" \
     /etc/systemd/system/steamos-cec-resume-wake.service
   rm -f /etc/systemd/system-sleep/steamos-cec-system-sleep
+  rm -f /etc/systemd/system-sleep/steamos-cec-before-sleep
   systemctl daemon-reload
   if run_user_systemctl is-enabled --quiet steamos-cec-steam-button.service; then
     systemctl enable steamos-cec-resume-wake.service
@@ -192,8 +195,11 @@ chmod -R a+rX "$PLUGIN_DIR/steamos-cec-toolkit"
 run_user_systemctl daemon-reload
 run_user_systemctl try-restart steamos-cec-boot-wake.service || true
 run_user_systemctl try-restart steamos-cec-steam-button.service || true
+run_user_systemctl try-restart steamos-cec-tv-standby-suspend.service || true
 run_user_systemctl try-restart steamos-cec-input-away-suspend.service || true
 run_user_systemctl try-restart steamos-cec-gamescope-recovery.service || true
+run_user_systemctl try-restart steamos-cec-external-volume.service || true
+run_user_systemctl try-restart steamos-cec-external-volume.socket || true
 
 echo "Installed SteamOS CEC Toolkit Decky plugin update."
 echo "Plugin: $PLUGIN_DIR/steamos-cec-toolkit"

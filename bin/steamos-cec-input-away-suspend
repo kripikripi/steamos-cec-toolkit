@@ -80,7 +80,7 @@ CEC_MONITOR_COMMAND = (
 )
 CEC_ACTIVE_SOURCE_OPCODES = {
     int(token, 16)
-    for token in CONFIG.get("CEC_ACTIVE_SOURCE_OPCODES", "0x2f:0x33")
+    for token in CONFIG.get("CEC_ACTIVE_SOURCE_OPCODES", "0x82:0x86")
     .replace(",", ":").split(":")
     if token
 }
@@ -209,12 +209,15 @@ async def monitor_cecd() -> None:
 
 
 def physical_address_payload() -> list[int] | None:
-    parts = [int(part, 10) for part in CEC_PHYSICAL_ADDRESS.split(".")[:2] if part != ""]
-    if not parts:
+    if not CEC_PHYSICAL_ADDRESS:
         return None
-    while len(parts) < 2:
-        parts.append(0)
-    return parts
+    try:
+        parts = [int(part, 16) for part in CEC_PHYSICAL_ADDRESS.split(".")]
+    except ValueError:
+        return None
+    if len(parts) != 4 or any(part < 0 or part > 15 for part in parts):
+        return None
+    return [(parts[0] << 4) | parts[1], (parts[2] << 4) | parts[3]]
 
 
 async def monitor_raw() -> None:
@@ -256,15 +259,18 @@ async def monitor_raw() -> None:
                 continue
             if source is None or not line.lstrip().startswith("Raw:"):
                 continue
-            tokens = line.lstrip()[len("Raw:"):].split()
+            raw_text = line.lstrip()[len("Raw:"):].split("(", 1)[0]
+            tokens = raw_text.split()
             try:
                 payload = [int(token, 16) for token in tokens]
             except ValueError:
                 continue
-            if len(payload) >= 3 and payload[2] in CEC_ACTIVE_SOURCE_OPCODES:
+            if len(payload) >= 2 and payload[1] in CEC_ACTIVE_SOURCE_OPCODES:
                 if destination == 15:
-                    if own_physical and len(payload) >= 5 and payload[3:5] == own_physical:
+                    if own_physical and len(payload) >= 4 and payload[2:4] == own_physical:
                         apply_active(state, True)
+                    elif len(payload) >= 4:
+                        apply_active(state, False)
                     continue
                 apply_active(state, destination == own_la)
         await process.wait()

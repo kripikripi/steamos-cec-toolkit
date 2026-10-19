@@ -701,7 +701,7 @@ def external_volume_state() -> dict[str, Any]:
     return {
         "config_exists": config_exists,
         "override_exists": CEC_SERVICE_OVERRIDE.exists(),
-        "enabled": config_exists and CEC_SERVICE_OVERRIDE.exists(),
+        "enabled": config_exists,
         "service": service,
         "socket": socket,
         "capabilities_ok": capabilities["ok"]
@@ -966,7 +966,23 @@ def wake_tv() -> dict[str, Any]:
     return payload
 
 
+def raw_standby(config: dict[str, str]) -> list[dict[str, Any]]:
+    cec_device = config.get("CEC_DEVICE", "/dev/cec0")
+    playback = current_playback_logical_address(config)
+    tv = config.get("TV_LOGICAL_ADDRESS", "0")
+    commands = [
+        ["cec-ctl", "-d", cec_device, "-s", "--to", tv, "--standby"],
+        ["cec-ctl", "-d", cec_device, "-s", "--raw-msg", "-f", playback, "-t", tv, "--custom-command", "cmd=0x36"],
+    ]
+    results: list[dict[str, Any]] = []
+    for command in commands:
+        results.append(run(command, timeout=8))
+    return results
+
+
 def standby_tv() -> dict[str, Any]:
+    config = read_config()
+    raw_results = raw_standby(config)
     result = run(
         [
             "busctl",
@@ -981,7 +997,14 @@ def standby_tv() -> dict[str, Any]:
         ]
     )
     payload = status()
-    payload["action"] = result
+    payload["action"] = {
+        "ok": result["ok"] or any(raw_result["ok"] for raw_result in raw_results),
+        "returncode": result["returncode"],
+        "stdout": "\n".join(
+            [raw_result["stdout"] for raw_result in raw_results if raw_result["stdout"]]
+            + ([result["stdout"]] if result["stdout"] else [])
+        ),
+    }
     return payload
 
 

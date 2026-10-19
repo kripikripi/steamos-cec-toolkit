@@ -11,7 +11,7 @@ USB_WAKE_MATCH="${USB_WAKE_MATCH:-bluetooth|steam controller|xbox|playstation|du
 USB_WAKE_EXCLUDE="${USB_WAKE_EXCLUDE:-hub|host controller|keyboard|mouse|touchpad|aura|audio}"
 USB_WAKE_USB_IDS="${USB_WAKE_USB_IDS:-8087:0032}"
 USB_WAKE_BUILTIN_USB_IDS="045e:028e"
-USB_WAKE_EXCLUDE_USB_IDS="8087:0029"
+USB_WAKE_EXCLUDE_USB_IDS="${USB_WAKE_EXCLUDE_USB_IDS:-8087:0029}"
 USB_WAKE_BLUETOOTH_CLASS="${USB_WAKE_BLUETOOTH_CLASS:-0}"
 USB_WAKE_STATE_FILE="${USB_WAKE_STATE_FILE:-/var/lib/steamos-cec-toolkit/usb-wake-state}"
 USB_WAKE_STATE="${1:-on}"
@@ -151,14 +151,27 @@ done
 # USB ID and enable the wake-capable hub/controller parents instead.
 for device_dir in /sys/bus/usb/devices/*; do
   [[ -r "$device_dir/idVendor" && -r "$device_dir/idProduct" ]] || continue
+  [[ ! -e "$device_dir/power/wakeup" ]] || continue
   usb_id="$(cat "$device_dir/idVendor")":"$(cat "$device_dir/idProduct")"
   if [[ ! " $USB_WAKE_BUILTIN_USB_IDS " =~ " $usb_id " ]]; then
+    continue
+  fi
+  if [[ " $USB_WAKE_EXCLUDE_USB_IDS " =~ " $usb_id " ]]; then
     continue
   fi
   matched=$((matched + 1))
   if [[ "$target_state" == "enabled" ]]; then
     enable_wakeup_path "$device_dir"
+    continue
   fi
+  product="$(cat "$device_dir/product" 2>/dev/null || true)"
+  manufacturer="$(cat "$device_dir/manufacturer" 2>/dev/null || true)"
+  label="$(printf '%s %s' "$manufacturer" "$product" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  items+=("$(printf '{"path":%s,"label":%s,"before":%s,"after":%s}' \
+    "$(json_escape "$device_dir")" \
+    "$(json_escape "${label:-receiver} ($usb_id)")" \
+    "$(json_escape "none")" \
+    "$(json_escape "none")")")
 done
 
 printf '{"ok":true,"matched":%d,"changed":%d,"devices":[' "$matched" "$changed"

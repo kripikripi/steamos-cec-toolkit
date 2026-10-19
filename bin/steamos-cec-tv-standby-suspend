@@ -40,7 +40,13 @@ def read_config(path: str = DEFAULT_CONFIG) -> dict[str, str]:
     return config
 
 
-CONFIG = read_config(os.environ.get("STEAMOS_CEC_CONFIG", DEFAULT_CONFIG))
+SYSTEM_CONFIG = read_config(os.environ.get("STEAMOS_CEC_CONFIG", DEFAULT_CONFIG))
+STEAMOS_CEC_USER = SYSTEM_CONFIG.get("STEAMOS_CEC_USER", "deck")
+_cec_user_home = os.path.expanduser("~" + STEAMOS_CEC_USER)
+if not _cec_user_home.startswith("/"):
+    _cec_user_home = f"/home/{STEAMOS_CEC_USER}"
+USER_CONFIG = f"{_cec_user_home}/.config/steamos-cec-toolkit/config.conf"
+CONFIG = {**SYSTEM_CONFIG, **read_config(USER_CONFIG)}
 TV_LOGICAL_ADDRESS = int(CONFIG.get("TV_LOGICAL_ADDRESS", "0"), 0)
 CEC_STANDBY_OPCODE = int(CONFIG.get("CEC_STANDBY_OPCODE", "0x36"), 0)
 CEC_DEVICE = CONFIG.get("CEC_DEVICE", "/dev/cec0")
@@ -133,13 +139,14 @@ async def monitor_raw() -> None:
                 continue
             if source is None or not line.lstrip().startswith("Raw:"):
                 continue
-            tokens = line.lstrip()[len("Raw:"):].split()
+            raw_text = line.lstrip()[len("Raw:"):].split("(", 1)[0]
+            tokens = raw_text.split()
             try:
                 payload = [int(token, 16) for token in tokens]
             except ValueError:
                 continue
-            if source == TV_LOGICAL_ADDRESS and destination == 15 and len(payload) >= 3:
-                opcode = payload[2]
+            if source == TV_LOGICAL_ADDRESS and destination == 15 and len(payload) >= 2:
+                opcode = payload[1]
                 if opcode == CEC_STANDBY_OPCODE:
                     if local_suspend_in_progress():
                         LOG.info("Ignoring TV standby caused by local suspend")

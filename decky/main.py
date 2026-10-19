@@ -18,21 +18,86 @@ class Plugin:
         # which is not necessarily /home/deck on Arch-derived systems (CachyOS
         # Handheld Edition, plain Arch). Prefer a home that actually contains the
         # helper, then fall back to the loader user's home.
-        candidates = []
-        for key in ("SUDO_USER_HOME", "HOME"):
-            value = os.environ.get(key, "")
-            if value:
-                candidates.append(Path(value))
+        candidates: list[Path] = []
+
+        # 1. System config if set by installer
+        conf_path = Path("/etc/steamos-cec-toolkit.conf")
+        if conf_path.is_file():
+            try:
+                for line in conf_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line.startswith("STEAMOS_CEC_USER="):
+                        val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        if val:
+                            candidates.append(Path(f"/home/{val}"))
+                        break
+            except Exception:
+                pass
+
+        # 2. Decky loader environment variables / attributes
+        decky_home = getattr(decky, "DECKY_USER_HOME", None)
+        if decky_home:
+            candidates.append(Path(decky_home))
+        for key in ("DECKY_USER_HOME", "SUDO_USER_HOME"):
+            val = os.environ.get(key, "")
+            if val:
+                candidates.append(Path(val))
+        for key in ("DECKY_USER", "SUDO_USER"):
+            val = os.environ.get(key, "")
+            if val:
+                candidates.append(Path(f"/home/{val}"))
+
+        # 3. Standard SteamOS / CachyOS / Arch handheld accounts
+        candidates.append(Path("/home/deck"))
+        candidates.append(Path("/home/cachyos"))
+
+        home_dir = Path("/home")
+        if home_dir.is_dir():
+            try:
+                for entry in home_dir.iterdir():
+                    if entry.is_dir():
+                        candidates.append(entry)
+            except Exception:
+                pass
+
+        for key in ("HOME",):
+            val = os.environ.get(key, "")
+            if val:
+                candidates.append(Path(val))
         candidates.append(Path.home())
+
         for candidate in candidates:
-            if (candidate / ".local/bin/steamos-cec-toolkitctl").exists():
+            if (candidate / ".local/bin/steamos-cec-toolkitctl").is_file():
                 return candidate
         for candidate in candidates:
-            if candidate.exists():
+            if candidate.is_dir():
                 return candidate
         return Path.home()
 
+    @staticmethod
+    def resolve_uid(home: Path) -> int:
+        try:
+            stat_res = home.stat()
+            if stat_res.st_uid != 0:
+                return stat_res.st_uid
+        except Exception:
+            pass
+        try:
+            import pwd
+            return pwd.getpwnam(home.name).pw_uid
+        except Exception:
+            pass
+        return os.getuid()
+
     async def _run_ctl(self, *args: str) -> dict:
+        target_uid = self.resolve_uid(self._home)
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+        if not runtime_dir or runtime_dir == "/run/user/0":
+            runtime_dir = f"/run/user/{target_uid}"
+        dbus_addr = os.environ.get("DBUS_SESSION_BUS_ADDRESS")
+        if not dbus_addr or "run/user/0" in dbus_addr:
+            dbus_addr = f"unix:path={runtime_dir}/bus"
+
         command = [str(self._ctl_path), *args]
         env = os.environ.copy()
         env.update(
@@ -40,10 +105,8 @@ class Plugin:
                 "HOME": str(self._home),
                 "PATH": f"{self._home}/.local/bin:/usr/local/bin:/usr/bin:/bin",
                 "SYSTEMD_PAGER": "",
-                "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
-                "DBUS_SESSION_BUS_ADDRESS": os.environ.get(
-                    "DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{os.getuid()}/bus"
-                ),
+                "XDG_RUNTIME_DIR": runtime_dir,
+                "DBUS_SESSION_BUS_ADDRESS": dbus_addr,
             }
         )
         env.pop("LD_LIBRARY_PATH", None)

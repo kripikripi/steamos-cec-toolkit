@@ -258,8 +258,8 @@ class Server:
             except (TypeError, ValueError):
                 send_error(conn, "org.varlink.service.InvalidParameter")
                 return
-            # Accept both PipeWire's 0..100 range and clients that send 0..1.
-            if 0.0 <= volume <= 1.0:
+            # If a client erroneously sends a normalized float (0.0 < volume < 1.0), scale to 0..100.
+            if 0.0 < volume < 1.0:
                 volume *= 100.0
             if not 0.0 <= volume <= 100.0:
                 send_error(conn, "org.varlink.service.InvalidParameter")

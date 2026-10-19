@@ -58,7 +58,13 @@ def read_config(path: str = DEFAULT_CONFIG) -> dict[str, str]:
     return config
 
 
-CONFIG = read_config(os.environ.get("STEAMOS_CEC_CONFIG", DEFAULT_CONFIG))
+SYSTEM_CONFIG = read_config(os.environ.get("STEAMOS_CEC_CONFIG", DEFAULT_CONFIG))
+STEAMOS_CEC_USER = SYSTEM_CONFIG.get("STEAMOS_CEC_USER", "deck")
+_cec_user_home = os.path.expanduser("~" + STEAMOS_CEC_USER)
+if not _cec_user_home.startswith("/"):
+    _cec_user_home = f"/home/{STEAMOS_CEC_USER}"
+USER_CONFIG = f"{_cec_user_home}/.config/steamos-cec-toolkit/config.conf"
+CONFIG = {**SYSTEM_CONFIG, **read_config(USER_CONFIG)}
 CONNECTOR_STATUS = Path(
     CONFIG.get("GAMESCOPE_CONNECTOR_STATUS", "/sys/class/drm/card0-DP-1/status")
 )
@@ -88,7 +94,7 @@ GAMESCOPE_SESSION_TARGET_UNIT = CONFIG.get(
 )
 CEC_ACTIVE_SOURCE_OPCODES = {
     int(token, 16)
-    for token in CONFIG.get("CEC_ACTIVE_SOURCE_OPCODES", "0x2f:0x33")
+    for token in CONFIG.get("CEC_ACTIVE_SOURCE_OPCODES", "0x82:0x86")
     .replace(",", ":").split(":")
     if token
 }
@@ -254,12 +260,19 @@ async def own_logical_address() -> int | None:
 
 
 def parse_physical_address(text: str) -> list[int] | None:
-    parts = [int(part, 10) for part in text.split(".")[:2] if part != ""]
+    parts = [part for part in text.split(".") if part != ""]
     if not parts:
         return None
-    while len(parts) < 2:
-        parts.append(0)
-    return parts
+    try:
+        nibbles = [int(part, 16) for part in parts]
+    except ValueError:
+        return None
+    while len(nibbles) < 4:
+        nibbles.append(0)
+    return [
+        (nibbles[0] << 4) | (nibbles[1] & 0x0F),
+        (nibbles[2] << 4) | (nibbles[3] & 0x0F),
+    ]
 
 
 async def monitor_cec(state: dict[str, object]) -> None:
@@ -335,17 +348,20 @@ async def monitor_cec_raw(state: dict[str, object]) -> None:
                 continue
             if source is None or not line.lstrip().startswith("Raw:"):
                 continue
-            tokens = line.lstrip()[len("Raw:"):].split()
+            tokens = [
+                token.split("(", 1)[0]
+                for token in line.lstrip()[len("Raw:"):].split()
+            ]
             try:
-                payload = [int(token, 16) for token in tokens]
+                payload = [int(token, 16) for token in tokens if token]
             except ValueError:
                 continue
-            if len(payload) >= 3 and payload[2] in CEC_ACTIVE_SOURCE_OPCODES:
+            if len(payload) >= 2 and payload[1] in CEC_ACTIVE_SOURCE_OPCODES:
                 if destination == 15:
                     active = bool(
                         own_physical
-                        and len(payload) >= 5
-                        and payload[3:5] == own_physical
+                        and len(payload) >= 4
+                        and payload[2:4] == own_physical
                     )
                 else:
                     active = destination == own_la

@@ -14,6 +14,9 @@ systemctl --user disable --now steamos-cec-steam-button.service 2>/dev/null || t
 systemctl --user disable --now steamos-cec-tv-standby-suspend.service 2>/dev/null || true
 systemctl --user disable --now steamos-cec-input-away-suspend.service 2>/dev/null || true
 systemctl --user disable --now steamos-cec-gamescope-recovery.service 2>/dev/null || true
+systemctl --user disable --now steamos-cec-external-volume.socket 2>/dev/null || true
+systemctl --user disable --now steamos-cec-external-volume.service 2>/dev/null || true
+systemctl --user disable --now steamos-cec-boot-wake.service 2>/dev/null || true
 
 rm -f "$HOME/.config/systemd/user/steamos-cec-steam-button.service"
 rm -f "$HOME/.config/systemd/user/steamos-cec-tv-standby-suspend.service"
@@ -21,6 +24,7 @@ rm -f "$HOME/.config/systemd/user/steamos-cec-input-away-suspend.service"
 rm -f "$HOME/.config/systemd/user/steamos-cec-gamescope-recovery.service"
 rm -f "$HOME/.config/systemd/user/steamos-cec-external-volume.service"
 rm -f "$HOME/.config/systemd/user/steamos-cec-external-volume.socket"
+rm -f "$HOME/.config/systemd/user/steamos-cec-boot-wake.service"
 rm -f "$HOME/.config/systemd/user/cec-audio-control.service.d/override.conf"
 rm -f "$HOME/.config/wireplumber/wireplumber.conf.d/99-steamos-cec-external-volume.conf"
 rm -f "$HOME/.local/bin/steamos-cec-volume"
@@ -30,11 +34,13 @@ rm -f "$HOME/.local/bin/steamos-cec-steam-button"
 rm -f "$HOME/.local/bin/steamos-cec-tv-standby-suspend"
 rm -f "$HOME/.local/bin/steamos-cec-input-away-suspend"
 rm -f "$HOME/.local/bin/steamos-cec-gamescope-recovery"
+rm -f "$HOME/.local/bin/steamos-cec-boot-wake"
 
 systemctl --user daemon-reload
 systemctl --user stop steamos-cec-external-volume.service 2>/dev/null || true
+systemctl --user stop steamos-cec-external-volume.socket 2>/dev/null || true
 systemctl --user stop cec-audio-control.service 2>/dev/null || true
-systemctl --user start steamos-cec-external-volume.socket 2>/dev/null || true
+systemctl --user start cec-audio-control.socket 2>/dev/null || true
 systemctl --user restart wireplumber.service 2>/dev/null || true
 
 sudo systemctl disable --now steamos-cec-before-sleep.service 2>/dev/null || true
@@ -47,6 +53,7 @@ sudo rm -f /etc/systemd/system/steamos-cec-permissions.service
 sudo rm -f /etc/systemd/system/steamos-cec-usb-wake.service
 sudo rm -f /etc/systemd/system/steamos-cec-resume-wake.service
 sudo rm -f /etc/systemd/system/steamos-cec-adapter-config.service
+sudo rm -f /etc/systemd/system-sleep/steamos-cec-before-sleep
 sudo rm -f /etc/systemd/system-sleep/steamos-cec-system-sleep
 sudo rm -f /etc/udev/rules.d/70-steamos-cec-toolkit.rules
 sudo rm -f /etc/udev/rules.d/99-steamos-cec-adapter-config.rules
@@ -57,6 +64,8 @@ sudo systemctl daemon-reload
 
 if [[ "$remove_config" -eq 1 ]]; then
   sudo rm -f /etc/steamos-cec-toolkit.conf
+  rm -rf "$HOME/.config/steamos-cec-toolkit"
 fi
+
 
 echo "Uninstalled SteamOS CEC Toolkit."
