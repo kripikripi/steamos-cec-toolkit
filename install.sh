@@ -18,11 +18,19 @@ enable_usb_wake=0
 restart_services=1
 verify_atomic_update=0
 
+if [[ $# -eq 0 && -t 0 && "${STEAMOS_CEC_NONINTERACTIVE:-0}" != "1" && "${STEAMOS_CEC_EASY_INSTALL:-0}" != "1" ]]; then
+  echo "Defaulting to easy-install wizard (use './install.sh --non-interactive' or pass flags for scripted install)."
+  export STEAMOS_CEC_EASY_INSTALL=1
+  exec "$PROJECT_DIR/scripts/easy-install.sh"
+fi
+
 usage() {
   cat <<'USAGE'
 Usage: ./install.sh [options]
 
 Options:
+  --easy-install                Run the interactive setup wizard and Decky plugin installer (default in interactive terminal)
+  --non-interactive             Run core install without prompts using defaults/flags
   --enable-steam-button         Wake the TV/AVR and activate this HDMI input from the Steam button/controller wake
   --enable-boot-wake            Wake the TV/AVR and activate this HDMI input when SteamOS starts
   --enable-tv-standby-suspend   Suspend SteamOS when the TV broadcasts HDMI-CEC standby
@@ -43,6 +51,11 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --easy-install)
+      export STEAMOS_CEC_EASY_INSTALL=1
+      exec "$PROJECT_DIR/scripts/easy-install.sh"
+      ;;
+    --non-interactive|--batch) ;;
     --enable-steam-button) enable_steam_button=1 ;;
     --enable-boot-wake) enable_boot_wake=1 ;;
     --enable-tv-standby-suspend) enable_tv_standby=1 ;;

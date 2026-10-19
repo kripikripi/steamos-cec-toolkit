@@ -175,23 +175,32 @@ if ask_yes_no "Enable Gamescope recovery after CEC input activation?" "$gamescop
   enable_gamescope_recovery=1
 fi
 
-step "Downloading toolkit"
-rm -rf "$WORKDIR"
-mkdir -p "$WORKDIR"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+LOCAL_REPO_DIR="$(cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd || true)"
 
-if [[ -n "$RELEASE_BASE_URL" && -z "$TOOLKIT_TARBALL_URL" ]]; then
-  TOOLKIT_TARBALL_URL="$RELEASE_BASE_URL/steamos-cec-toolkit.tar.gz"
-fi
-if [[ -n "$RELEASE_BASE_URL" && -z "$DECKY_PLUGIN_ZIP_URL" ]]; then
-  DECKY_PLUGIN_ZIP_URL="$RELEASE_BASE_URL/steamos-cec-toolkit-decky.zip"
-fi
-
-if [[ -n "$TOOLKIT_TARBALL_URL" ]]; then
-  curl -fL "$TOOLKIT_TARBALL_URL" -o "$WORKDIR/toolkit.tar.gz"
-  tar -xzf "$WORKDIR/toolkit.tar.gz" -C "$WORKDIR" --strip-components=1
+if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/install.sh" && -d "$SCRIPT_DIR/decky" ]]; then
+  WORKDIR="$SCRIPT_DIR"
+elif [[ -n "$LOCAL_REPO_DIR" && -f "$LOCAL_REPO_DIR/install.sh" && -d "$LOCAL_REPO_DIR/decky" ]]; then
+  WORKDIR="$LOCAL_REPO_DIR"
 else
-  require_command git
-  git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$WORKDIR"
+  step "Downloading toolkit"
+  rm -rf "$WORKDIR"
+  mkdir -p "$WORKDIR"
+
+  if [[ -n "$RELEASE_BASE_URL" && -z "$TOOLKIT_TARBALL_URL" ]]; then
+    TOOLKIT_TARBALL_URL="$RELEASE_BASE_URL/steamos-cec-toolkit.tar.gz"
+  fi
+  if [[ -n "$RELEASE_BASE_URL" && -z "$DECKY_PLUGIN_ZIP_URL" ]]; then
+    DECKY_PLUGIN_ZIP_URL="$RELEASE_BASE_URL/steamos-cec-toolkit-decky.zip"
+  fi
+
+  if [[ -n "$TOOLKIT_TARBALL_URL" ]]; then
+    curl -fL "$TOOLKIT_TARBALL_URL" -o "$WORKDIR/toolkit.tar.gz"
+    tar -xzf "$WORKDIR/toolkit.tar.gz" -C "$WORKDIR" --strip-components=1
+  else
+    require_command git
+    git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$WORKDIR"
+  fi
 fi
 cd "$WORKDIR"
 
@@ -222,6 +231,7 @@ if [[ "$verify_atomic_update" -eq 1 ]]; then
 fi
 
 step "Installing CEC toolkit"
+export STEAMOS_CEC_EASY_INSTALL=1
 ./install.sh "${install_args[@]}"
 
 if [[ "$install_decky" -eq 1 ]]; then

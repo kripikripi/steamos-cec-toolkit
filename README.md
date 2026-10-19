@@ -58,7 +58,7 @@ For the Radeon 9070 XT plus DP-to-HDMI adapter setup:
 
 ```bash
 sudo pacman -S v4l-utils python
-REPO_URL=https://github.com/kripikripi/steamos-cec-toolkit.git bash <(curl -fsSL https://raw.githubusercontent.com/kripikripi/steamos-cec-toolkit/kripikripi-cachyos-cec-support/scripts/easy-install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/kripikripi/steamos-cec-toolkit/kripikripi-cachyos-cec-support/scripts/easy-install.sh)
 ```
 
 The installer discovers `/dev/cec*` devices and generates a per-user
@@ -132,28 +132,26 @@ line instead.
 
 ## Install
 
-Recommended install path:
+Recommended install path (easy install):
 
-Run this on the SteamOS machine as the normal desktop user, usually `deck`:
+Run this on the machine as the normal desktop user (e.g. `deck` on SteamOS, or your desktop user on CachyOS/Arch):
 
 ```bash
-bash <(curl -fsSL https://github.com/kripikripi/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/kripikripi/steamos-cec-toolkit/kripikripi-cachyos-cec-support/scripts/easy-install.sh)
 ```
 
 The installer will:
 
-- download the latest release assets
-- ask which features you want to enable
-- install the CEC volume shim and root helpers
+- download or update the toolkit
+- interactively ask which features you want to enable
+- install the CEC volume shim, systemd services, and root helpers
 - optionally install the Decky plugin
-- discover CEC devices where possible
+- automatically discover CEC adapters and HDMI audio outputs
 - restart Decky Loader if the plugin is installed
 
-This is the recommended path for most users. It installs the core toolkit,
-asks which features to enable, and can install the Decky plugin. A manual
-`git clone` + `./install.sh` install is supported, but it is an advanced path:
-it does not install the Decky plugin automatically, and optional features must
-be enabled with flags.
+This is the default and recommended path for all users.
+
+If you clone the repository manually (`git clone`), running `./easy-install.sh` (or `./install.sh` with no arguments) runs this same interactive wizard. For automated or scripted deployments, `./install.sh` supports non-interactive feature flags (e.g. `./install.sh --enable-steam-button`).
 
 If you install the Decky plugin, open Game Mode and use the `SteamOS CEC`
 plugin:
@@ -183,12 +181,10 @@ If you do not use Decky, the toolkit can still be managed from the command line:
 ~/.local/bin/steamos-cec-toolkitctl standby
 ```
 
-Development builds can be installed with (the fork keeps the CachyOS changes on
-the `kripikripi-cachyos-cec-support` branch; `easy-install.sh` clones it by
-default via `REPO_REF`):
+Custom or development branches can be installed by setting `REPO_REF` (defaults to `kripikripi-cachyos-cec-support`):
 
 ```bash
-REPO_URL=https://github.com/kripikripi/steamos-cec-toolkit.git bash <(curl -fsSL https://raw.githubusercontent.com/kripikripi/steamos-cec-toolkit/kripikripi-cachyos-cec-support/scripts/easy-install.sh)
+REPO_REF=kripikripi-cachyos-cec-support bash <(curl -fsSL https://raw.githubusercontent.com/kripikripi/steamos-cec-toolkit/kripikripi-cachyos-cec-support/scripts/easy-install.sh)
 ```
 
 ## Requirements
@@ -236,6 +232,7 @@ and whether the controller exposes a normal gamepad Home/Guide input event.
 User files:
 
 ```text
+~/.local/bin/steamos-cec-toolkitctl
 ~/.local/bin/steamos-cec-volume
 ~/.local/bin/steamos-cec-external-volume
 ~/.local/bin/steamos-cec-boot-wake
@@ -243,8 +240,8 @@ User files:
 ~/.local/bin/steamos-cec-tv-standby-suspend
 ~/.local/bin/steamos-cec-input-away-suspend
 ~/.local/bin/steamos-cec-gamescope-recovery
-~/.config/systemd/user/cec-audio-control.service.d/override.conf
 ~/.config/systemd/user/steamos-cec-*.service
+~/.config/systemd/user/steamos-cec-external-volume.socket
 ~/.config/wireplumber/wireplumber.conf.d/99-steamos-cec-external-volume.conf
 ```
 
@@ -324,10 +321,10 @@ If you use Decky, the plugin is the first place to check:
   device permission problems can usually be repaired directly from the plugin;
   missing root helpers still require rerunning the installer.
 
-The normal repair step is simply to rerun the latest installer:
+The normal repair step is simply to rerun the installer:
 
 ```bash
-bash <(curl -fsSL https://github.com/kripikripi/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/kripikripi/steamos-cec-toolkit/kripikripi-cachyos-cec-support/scripts/easy-install.sh)
 ```
 
 This refreshes the root helpers, sudoers rule, systemd units, WirePlumber
@@ -342,7 +339,7 @@ To verify SteamOS atomic-update persistence on systems that include
 `holo-sync-var`, run:
 
 ```bash
-bash <(curl -fsSL https://github.com/kripikripi/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh) --verify
+bash <(curl -fsSL https://raw.githubusercontent.com/kripikripi/steamos-cec-toolkit/kripikripi-cachyos-cec-support/scripts/easy-install.sh) --verify
 ```
 
 The installer keeps the atomic update manifest installed either way. `--verify`
@@ -633,7 +630,7 @@ Check the Varlink capabilities:
 
 ```bash
 varlinkctl call \
-  unix:/run/user/1000/cec-audio-control/org.pipewire.ExternalVolume \
+  unix:$XDG_RUNTIME_DIR/steamos-cec-toolkit/org.pipewire.ExternalVolume \
   org.pipewire.ExternalVolume.GetCapabilities \
   '{"device":""}'
 ```
@@ -653,7 +650,7 @@ Test volume:
 
 ```bash
 varlinkctl call \
-  unix:/run/user/1000/cec-audio-control/org.pipewire.ExternalVolume \
+  unix:$XDG_RUNTIME_DIR/steamos-cec-toolkit/org.pipewire.ExternalVolume \
   org.pipewire.ExternalVolume.WriteVolumeRelative \
   '{"device":"","route":"hdmi-output-0","step":1.0}'
 ```
@@ -889,11 +886,13 @@ GAMESCOPE_TV_POWER_POLL_SECONDS=3
 ## Logs
 
 ```bash
-journalctl --user -b -u cec-audio-control.service --no-pager
+journalctl --user -b -u steamos-cec-external-volume.service --no-pager
 journalctl --user -b -u steamos-cec-steam-button.service --no-pager
 journalctl --user -b -u steamos-cec-tv-standby-suspend.service --no-pager
+journalctl --user -b -u steamos-cec-input-away-suspend.service --no-pager
 journalctl --user -b -u steamos-cec-gamescope-recovery.service --no-pager
 journalctl --user -b -u wireplumber.service --no-pager
+journalctl -b -u steamos-cec-adapter-config.service --no-pager
 journalctl -b -u steamos-cec-resume-wake.service --no-pager
 ```
 
@@ -918,6 +917,7 @@ This project grants passwordless sudo only for fixed toolkit helpers:
 /var/lib/steamos-cec-toolkit/steamos-cec-debug-monitor *
 /var/lib/steamos-cec-toolkit/steamos-cec-power-standby-control *
 /var/lib/steamos-cec-toolkit/steamos-cec-usb-wake-control *
+/var/lib/steamos-cec-toolkit/steamos-cec-permissions-apply
 ```
 
 These helpers validate their limited subcommands and should not be replaced by

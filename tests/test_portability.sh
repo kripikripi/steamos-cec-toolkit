@@ -17,6 +17,7 @@ if grep -q 'cec-audio-control.socket' "$ROOT/install.sh"; then
 fi
 
 bash -n "$ROOT/scripts/easy-install.sh"
+bash -n "$ROOT/easy-install.sh"
 bash -n "$ROOT/bin/steamos-cec-adapter-config"
 python3 -m py_compile \
   "$ROOT/bin/steamos-cec-tv-standby-suspend" \

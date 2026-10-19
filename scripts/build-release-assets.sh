@@ -78,7 +78,7 @@ tar \
   steamos-cec-toolkit
 
 sed \
-  -e "s|^RELEASE_BASE_URL=.*|RELEASE_BASE_URL=\"\${RELEASE_BASE_URL:-https://github.com/Twsts/steamos-cec-toolkit/releases/download/$VERSION}\"|" \
+  -e "s|^RELEASE_BASE_URL=.*|RELEASE_BASE_URL=\"\${RELEASE_BASE_URL:-https://github.com/kripikripi/steamos-cec-toolkit/releases/download/$VERSION}\"|" \
   "$PROJECT_DIR/scripts/easy-install.sh" \
   > "$RELEASE_DIR/steamos-cec-toolkit-installer.sh"
 chmod 0755 "$RELEASE_DIR/steamos-cec-toolkit-installer.sh"
