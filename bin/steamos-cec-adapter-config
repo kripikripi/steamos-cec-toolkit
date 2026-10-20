@@ -11,6 +11,13 @@ if [[ -r "$CONFIG_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
 fi
+STEAMOS_CEC_USER="${STEAMOS_CEC_USER:-deck}"
+USER_HOME="$(getent passwd "$STEAMOS_CEC_USER" 2>/dev/null | cut -d: -f6 || true)"
+USER_CONFIG="${STEAMOS_CEC_USER_CONFIG:-${USER_HOME:-/home/$STEAMOS_CEC_USER}/.config/steamos-cec-toolkit/config.conf}"
+if [[ -r "$USER_CONFIG" ]]; then
+  # shellcheck disable=SC1090
+  source "$USER_CONFIG"
+fi
 
 CEC_DEVICE="${CEC_DEVICE:-/dev/cec0}"
 OSD_NAME="${CEC_OSD_NAME:-CachyOS}"
@@ -34,7 +41,7 @@ while [[ ! -c "$CEC_DEVICE" ]]; do
 done
 
 find_edid_connector() {
-  local path status
+  local status
   # A DP-to-HDMI adapter tunnels CEC over the DisplayPort connector; prefer the
   # configured gamescope connector, then any connected DP connector, then HDMI.
   local -a status_paths=(
@@ -53,6 +60,31 @@ find_edid_connector() {
   return 1
 }
 
+reconcile_config() {
+  local allocated phys configured_la configured_pa
+  allocated="$(cec-ctl -d "$CEC_DEVICE" -s --logical-address 2>/dev/null | grep -o '[0-9]\+' | head -n1 || true)"
+  if [[ "$allocated" =~ ^([1-9]|1[0-4])$ ]] && grep -q '^CEC_PLAYBACK_LOGICAL_ADDRESS=' "$CONFIG_FILE" 2>/dev/null; then
+    configured_la="$(sed -n 's/^CEC_PLAYBACK_LOGICAL_ADDRESS=//p' "$CONFIG_FILE" | head -n1 | tr -d "\"'")"
+    if [[ "$configured_la" != "$allocated" ]]; then
+      echo "info: reconciling CEC_PLAYBACK_LOGICAL_ADDRESS (was ${configured_la:-unset}, adapter allocated $allocated) in $CONFIG_FILE"
+      sed -i "s|^CEC_PLAYBACK_LOGICAL_ADDRESS=.*|CEC_PLAYBACK_LOGICAL_ADDRESS=$allocated|" "$CONFIG_FILE"
+    fi
+  fi
+
+  phys="$(cec-ctl -d "$CEC_DEVICE" -s --physical-address 2>/dev/null | tr -d '[:space:]' || true)"
+  if [[ "$phys" =~ ^[0-9a-fA-F](\.[0-9a-fA-F]){3}$ && "${phys,,}" != "f.f.f.f" ]] && [[ -w "$CONFIG_FILE" ]]; then
+    configured_pa="$(sed -n 's/^CEC_PHYSICAL_ADDRESS=//p' "$CONFIG_FILE" | head -n1 | tr -d "\"'")"
+    if [[ "$configured_pa" != "$phys" ]]; then
+      echo "info: reconciling CEC_PHYSICAL_ADDRESS (was ${configured_pa:-unset}, adapter has $phys) in $CONFIG_FILE"
+      if grep -q '^CEC_PHYSICAL_ADDRESS=' "$CONFIG_FILE" 2>/dev/null; then
+        sed -i "s|^CEC_PHYSICAL_ADDRESS=.*|CEC_PHYSICAL_ADDRESS=$phys|" "$CONFIG_FILE"
+      else
+        printf 'CEC_PHYSICAL_ADDRESS=%s\n' "$phys" >> "$CONFIG_FILE"
+      fi
+    fi
+  fi
+}
+
 connector=""
 tries=0
 while [[ -z "$connector" ]]; do
@@ -66,20 +98,22 @@ while [[ -z "$connector" ]]; do
   fi
 done
 
-# --phys-addr-from-edid-poll keeps the physical address current when the EDID
-# changes; it runs in the background so the allocated logical address can be
-# written back to the shared configuration.
-cec-ctl --device "$CEC_DEVICE" --skip-info --osd-name "$OSD_NAME" --playback --phys-addr-from-edid-poll "$connector/edid" &
-poll_pid=$!
-sleep 2
-
-allocated="$(cec-ctl -d "$CEC_DEVICE" -s --logical-address 2>/dev/null | grep -o '[0-9]\+' | head -n1 || true)"
-if [[ "$allocated" =~ ^([1-9]|1[0-4])$ ]] && grep -q '^CEC_PLAYBACK_LOGICAL_ADDRESS=' "$CONFIG_FILE" 2>/dev/null; then
-  configured="$(sed -n 's/^CEC_PLAYBACK_LOGICAL_ADDRESS=//p' "$CONFIG_FILE" | head -n1)"
-  if [[ "$configured" != "$allocated" ]]; then
-    echo "info: reconciling CEC_PLAYBACK_LOGICAL_ADDRESS (was ${configured:-unset}, adapter allocated $allocated) in $CONFIG_FILE"
-    sed -i "s|^CEC_PLAYBACK_LOGICAL_ADDRESS=.*|CEC_PLAYBACK_LOGICAL_ADDRESS=$allocated|" "$CONFIG_FILE"
-  fi
+if cec-ctl --device "$CEC_DEVICE" 2>/dev/null | grep -A8 'Capabilities' | grep -q 'Physical Address'; then
+  # --phys-addr-from-edid-poll keeps the physical address current when the EDID
+  # changes; it runs in the background so the allocated logical address can be
+  # written back to the shared configuration.
+  cec-ctl --device "$CEC_DEVICE" --skip-info --osd-name "$OSD_NAME" --playback --phys-addr-from-edid-poll "$connector/edid" &
+  poll_pid=$!
+  sleep 2
+  reconcile_config
+  wait "$poll_pid"
+else
+  # Kernel driver manages the physical address from EDID automatically (e.g. amdgpu drm_dp_cec).
+  cec-ctl --device "$CEC_DEVICE" --skip-info --osd-name "$OSD_NAME" --playback >/dev/null
+  sleep 1
+  reconcile_config
+  while [[ -c "$CEC_DEVICE" ]]; do
+    reconcile_config
+    sleep 10
+  done
 fi
-
-wait "$poll_pid"

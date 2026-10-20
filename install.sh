@@ -182,6 +182,23 @@ if grep -Eq '^The Deck default below is the SteamOS Deck card id|^RVAPX 470 / RX
     "$CONFIG_FILE"
 fi
 
+if grep -qx 'CEC_ACTIVE_SOURCE_OPCODES=0x2f:0x33' "$CONFIG_FILE" 2>/dev/null; then
+  echo "Repairing legacy CEC_ACTIVE_SOURCE_OPCODES in $CONFIG_FILE"
+  sudo sed -i 's/^CEC_ACTIVE_SOURCE_OPCODES=0x2f:0x33$/CEC_ACTIVE_SOURCE_OPCODES=0x82:0x86/' "$CONFIG_FILE"
+fi
+
+if grep -qx 'USB_WAKE_BLUETOOTH_CLASS=1' "$CONFIG_FILE" 2>/dev/null; then
+  echo "Repairing legacy USB_WAKE_BLUETOOTH_CLASS in $CONFIG_FILE"
+  sudo sed -i 's/^USB_WAKE_BLUETOOTH_CLASS=1$/USB_WAKE_BLUETOOTH_CLASS=0/' "$CONFIG_FILE"
+fi
+
+if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "/run/user/$(id -u)" ]]; then
+  export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+fi
+if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus" ]]; then
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus"
+fi
+
 require_valid_config "$CONFIG_FILE"
 
 install -d "$HOME/.local/bin"
@@ -311,6 +328,7 @@ install -m 0644 "$PROJECT_DIR/systemd/user/steamos-cec-gamescope-recovery.servic
 if [[ "$enable_external_volume" -eq 1 ]]; then
   systemctl --user daemon-reload
   systemctl --user enable --now steamos-cec-external-volume.socket
+  systemctl --user start steamos-cec-external-volume.service 2>/dev/null || true
 fi
 
 if [[ "$enable_tv_standby" -eq 1 || "$enable_input_away_suspend" -eq 1 || "$enable_gamescope_recovery" -eq 1 ]]; then
@@ -368,10 +386,21 @@ if [[ "$restart_services" -eq 1 ]]; then
     echo "Restarting CEC audio socket"
     systemctl --user stop steamos-cec-external-volume.service 2>/dev/null || true
     systemctl --user start steamos-cec-external-volume.socket 2>/dev/null || true
+    systemctl --user start steamos-cec-external-volume.service 2>/dev/null || true
     echo "Restarting WirePlumber audio session"
     if ! systemctl_user_timeout 20 restart wireplumber.service; then
       echo "warning: WirePlumber restart did not complete. Reboot if CEC volume buttons do not update." >&2
     fi
+  fi
+  for unit in \
+    steamos-cec-steam-button.service \
+    steamos-cec-tv-standby-suspend.service \
+    steamos-cec-input-away-suspend.service \
+    steamos-cec-gamescope-recovery.service; do
+    systemctl --user try-restart "$unit" 2>/dev/null || true
+  done
+  if cec_platform_generic_cec; then
+    sudo systemctl try-restart steamos-cec-adapter-config.service 2>/dev/null || true
   fi
 fi
 

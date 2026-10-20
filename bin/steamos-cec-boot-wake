@@ -132,7 +132,33 @@ def current_playback_logical_address() -> str:
     return fallback
 
 
+def valid_physical_address(value: str) -> bool:
+    return (
+        bool(re.fullmatch(r"[0-9a-fA-F]\.[0-9a-fA-F]\.[0-9a-fA-F]\.[0-9a-fA-F]", value))
+        and value.lower() != "f.f.f.f"
+    )
+
+
 def physical_address() -> str:
+    if os.path.exists(CEC_DEVICE):
+        try:
+            result = subprocess.run(
+                ["cec-ctl", "-d", CEC_DEVICE],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if "Physical Address" in line:
+                        candidate = line.split(":", 1)[-1].strip()
+                        if valid_physical_address(candidate):
+                            return candidate
+                        break
+        except Exception:
+            pass
     return CEC_PHYSICAL_ADDRESS
 
 
@@ -146,13 +172,15 @@ def physical_address_payload() -> str | None:
         return None
     if len(parts) != 4 or any(part < 0 or part > 15 for part in parts):
         return None
+    if parts == [15, 15, 15, 15]:
+        return None
     return f"0x{(parts[0] << 4) | parts[1]:02x}:0x{(parts[2] << 4) | parts[3]:02x}"
 
 
-def raw_wake() -> None:
+def raw_wake() -> bool:
     if not cec_device_ready():
         LOG.warning("CEC device %s is missing or not writable after waiting; cannot send raw wake", CEC_DEVICE)
-        return
+        return False
 
     playback_logical_address = current_playback_logical_address()
     if playback_logical_address != CEC_PLAYBACK_LOGICAL_ADDRESS:
@@ -178,11 +206,15 @@ def raw_wake() -> None:
     else:
         LOG.warning("CEC_PHYSICAL_ADDRESS is not configured; skipping ACTIVE_SOURCE")
 
+    any_ok = False
     for command in commands:
         result = raw_cec(command)
         if result.returncode != 0:
             LOG.warning("Raw CEC wake command failed: %s", result.stdout.strip())
+        else:
+            any_ok = True
         time.sleep(0.25)
+    return any_ok
 
 
 def source_is_active() -> bool:
@@ -230,11 +262,14 @@ def main() -> int:
         LOG.info("SteamOS cecd is unavailable; using raw CEC wake/input activation")
 
     for attempt in range(1, attempts + 1):
-        if source_is_active():
+        if has_cecd and source_is_active():
             LOG.info("SteamOS HDMI-CEC source reports active before attempt %d; sending wake/input anyway", attempt)
-        raw_wake()
+        raw_ok = raw_wake()
         if not has_cecd:
-            LOG.info("Sent boot wake/input activation attempt %d", attempt)
+            if raw_ok:
+                LOG.info("Sent boot wake/input activation attempt %d", attempt)
+            else:
+                LOG.warning("Boot wake attempt %d skipped or failed", attempt)
         else:
             result = wake_source()
             if result.returncode != 0:

@@ -187,20 +187,20 @@ function DiagnosticsDetails({ status }) {
     if (!status?.ok) {
         return null;
     }
-    return (SP_JSX.jsxs("div", { style: { fontSize: "12px", opacity: 0.8, lineHeight: 1.35 }, children: [SP_JSX.jsxs("div", { children: ["Toolkit version: ", status.version || "Unknown"] }), SP_JSX.jsxs("div", { children: ["Root helper: ", yesNo(status.root_helper_exists)] }), SP_JSX.jsxs("div", { children: ["Debug helper: ", yesNo(status.debug_helper_exists)] }), SP_JSX.jsxs("div", { children: ["Power standby helper: ", yesNo(status.power_standby_helper_exists)] }), SP_JSX.jsxs("div", { children: ["USB wake helper: ", yesNo(status.usb_wake_helper_exists)] }), SP_JSX.jsxs("div", { children: ["Boot wake helper: ", yesNo(status.boot_wake_script_exists)] }), SP_JSX.jsxs("div", { children: ["Resume wake service: ", status.resume_wake_helper_exists && status.resume_wake_unit_exists ? "OK" : "Missing"] }), SP_JSX.jsxs("div", { children: ["CEC permissions: ", status.cec_device?.readable && status.cec_device?.writable ? "OK" : "Needs repair"] }), SP_JSX.jsxs("div", { children: ["Sudoers: ", yesNo(status.sudoers_exists)] }), SP_JSX.jsxs("div", { children: ["CEC volume buttons: ", status.external_volume?.enabled ? "On" : "Off"] }), SP_JSX.jsxs("div", { children: ["Relative volume: ", status.external_volume?.capabilities_ok ? "OK" : "Inactive"] }), SP_JSX.jsxs("div", { children: ["Custom config: ", status.config_exists ? "Present" : "Defaults"] })] }));
+    return (SP_JSX.jsxs("div", { style: { fontSize: "12px", opacity: 0.8, lineHeight: 1.35 }, children: [SP_JSX.jsxs("div", { children: ["Toolkit version: ", status.version || "Unknown"] }), SP_JSX.jsxs("div", { children: ["Root helper: ", yesNo(status.root_helper_exists)] }), SP_JSX.jsxs("div", { children: ["Debug helper: ", yesNo(status.debug_helper_exists)] }), SP_JSX.jsxs("div", { children: ["Power standby helper: ", yesNo(status.power_standby_helper_exists)] }), SP_JSX.jsxs("div", { children: ["USB wake helper: ", yesNo(status.usb_wake_helper_exists)] }), SP_JSX.jsxs("div", { children: ["Boot wake helper: ", yesNo(status.boot_wake_script_exists)] }), SP_JSX.jsxs("div", { children: ["Resume wake service: ", status.resume_wake_helper_exists && status.resume_wake_unit_exists ? "OK" : "Missing"] }), SP_JSX.jsxs("div", { children: ["CEC permissions: ", !status.cec_device?.exists ? "Adapter offline" : status.cec_device.readable && status.cec_device.writable ? "OK" : "Needs repair"] }), SP_JSX.jsxs("div", { children: ["Sudoers: ", yesNo(status.sudoers_exists)] }), SP_JSX.jsxs("div", { children: ["CEC volume buttons: ", status.external_volume?.enabled ? "On" : "Off"] }), SP_JSX.jsxs("div", { children: ["Relative volume: ", status.external_volume?.capabilities_ok ? "OK" : "Inactive"] }), SP_JSX.jsxs("div", { children: ["Custom config: ", status.config_exists ? "Present" : "Defaults"] })] }));
 }
 function needsInstallHelp(status) {
     if (!status?.ok) {
         return false;
     }
+    const permissionMissing = !!status.cec_device?.exists && (!status.cec_device.readable || !status.cec_device.writable);
     return (!status.root_helper_exists ||
         !status.debug_helper_exists ||
         !status.power_standby_helper_exists ||
         !status.usb_wake_helper_exists ||
         !status.cec_permissions_helper_exists ||
         !status.boot_wake_script_exists ||
-        !status.cec_device?.readable ||
-        !status.cec_device?.writable ||
+        permissionMissing ||
         !status.sudoers_exists ||
         !status.volume_script_exists ||
         !status.external_volume_script_exists ||
@@ -232,7 +232,7 @@ function missingItems(status) {
     if (!status.cec_permissions_helper_exists) {
         items.push("CEC permissions helper");
     }
-    if (!status.cec_device?.readable || !status.cec_device?.writable) {
+    if (status.cec_device?.exists && (!status.cec_device?.readable || !status.cec_device?.writable)) {
         items.push("CEC device permissions");
     }
     if (!status.volume_script_exists) {
@@ -260,7 +260,7 @@ function missingItems(status) {
 }
 function InstallHelp({ status, busy, onRepairPermissions }) {
     const items = missingItems(status);
-    const command = "bash <(curl -fsSL https://github.com/Twsts/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh)";
+    const command = "bash <(curl -fsSL https://github.com/kripikripi/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh)";
     const canRepairPermissions = !!status?.cec_permissions_helper_exists && !!status.cec_device?.exists;
     const permissionProblem = !!status?.cec_device?.exists && (!status.cec_device?.readable || !status.cec_device?.writable);
     return (SP_JSX.jsxs(DFL.PanelSection, { title: "Install / Repair", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { fontSize: "12px", opacity: 0.8, lineHeight: 1.35 }, children: [SP_JSX.jsxs("div", { children: ["Missing: ", items.length ? items.join(", ") : "toolkit bootstrap"] }), permissionProblem && (SP_JSX.jsxs("div", { style: { marginTop: "6px" }, children: ["CEC actions need read/write access to ", status?.cec_device?.device, ". Try repair here first."] })), SP_JSX.jsx("div", { style: { marginTop: "6px" }, children: "If repair is unavailable or does not fix it, run from Desktop/SSH:" }), SP_JSX.jsx("code", { style: { display: "block", whiteSpace: "normal", marginTop: "4px" }, children: command }), SP_JSX.jsx("div", { style: { marginTop: "6px" }, children: "The installer keeps your Decky configuration and refreshes root helpers." })] }) }), permissionProblem && canRepairPermissions && (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: onRepairPermissions, children: "Repair CEC Permissions" }) }))] }));

@@ -76,14 +76,16 @@ CEC_MONITOR_COMMAND = (
     "sudo",
     "-n",
     "/var/lib/steamos-cec-toolkit/steamos-cec-debug-monitor",
-    "5",
+    "0",
 )
+_raw_opcodes = CONFIG.get("CEC_ACTIVE_SOURCE_OPCODES", "0x82:0x86")
+if _raw_opcodes.strip() == "0x2f:0x33":
+    _raw_opcodes = "0x82:0x86"
 CEC_ACTIVE_SOURCE_OPCODES = {
     int(token, 16)
-    for token in CONFIG.get("CEC_ACTIVE_SOURCE_OPCODES", "0x82:0x86")
-    .replace(",", ":").split(":")
+    for token in _raw_opcodes.replace(",", ":").split(":")
     if token
-}
+} | {0x80, 0x82, 0x86}
 CEC_PHYSICAL_ADDRESS = CONFIG.get("CEC_PHYSICAL_ADDRESS", "")
 
 MONITOR_HEADER_RE = re.compile(
@@ -92,6 +94,8 @@ MONITOR_HEADER_RE = re.compile(
 
 
 def own_logical_address() -> "int | None":
+    if not os.path.exists(CEC_DEVICE):
+        return None
     try:
         out = subprocess.run(
             ["cec-ctl", "--device", CEC_DEVICE, "-s", "--logical-address"],
@@ -208,16 +212,40 @@ async def monitor_cecd() -> None:
     await asyncio.get_running_loop().create_future()
 
 
-def physical_address_payload() -> list[int] | None:
-    if not CEC_PHYSICAL_ADDRESS:
+def parse_physical_address_bytes(addr: str) -> list[int] | None:
+    if not addr:
         return None
     try:
-        parts = [int(part, 16) for part in CEC_PHYSICAL_ADDRESS.split(".")]
+        parts = [int(part, 16) for part in addr.split(".")]
     except ValueError:
         return None
     if len(parts) != 4 or any(part < 0 or part > 15 for part in parts):
         return None
+    if parts == [15, 15, 15, 15]:
+        return None
     return [(parts[0] << 4) | parts[1], (parts[2] << 4) | parts[3]]
+
+
+def physical_address_payload() -> list[int] | None:
+    if os.path.exists(CEC_DEVICE):
+        try:
+            out = subprocess.run(
+                ["cec-ctl", "--device", CEC_DEVICE],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            ).stdout
+            for line in out.splitlines():
+                if "Physical Address" in line:
+                    candidate = line.split(":", 1)[-1].strip()
+                    parsed = parse_physical_address_bytes(candidate)
+                    if parsed is not None:
+                        return parsed
+                    break
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return parse_physical_address_bytes(CEC_PHYSICAL_ADDRESS)
 
 
 async def monitor_raw() -> None:
@@ -228,22 +256,28 @@ async def monitor_raw() -> None:
     physical address payload instead. Initial state is active so we never
     suspend on startup when nothing has been observed yet.
     """
+    state: dict[str, object] = {"active": True, "task": None}
+    warned_no_la = False
+    monitor_cmd = list(CEC_MONITOR_COMMAND)
     while True:
         own_la = own_logical_address()
         if own_la is None:
-            LOG.warning("No logical address on %s; retrying" % CEC_DEVICE)
+            if not warned_no_la:
+                LOG.warning("No logical address on %s; waiting for CEC adapter", CEC_DEVICE)
+                warned_no_la = True
             await asyncio.sleep(10)
             continue
-        state: dict[str, object] = {"active": True, "task": None}
+        warned_no_la = False
         own_physical = physical_address_payload()
         LOG.info(
-            "Monitoring CEC source active state via cec-ctl raw monitor; own logical address=%s, initial state=True, delay=%ss",
+            "Monitoring CEC source active state via cec-ctl raw monitor; own logical address=%s, initial state=%s, delay=%ss",
             own_la,
+            state["active"],
             INPUT_INACTIVE_SUSPEND_DELAY_SECONDS,
         )
         started = time.time()
         process = await asyncio.create_subprocess_exec(
-            *CEC_MONITOR_COMMAND,
+            *monitor_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -266,15 +300,24 @@ async def monitor_raw() -> None:
             except ValueError:
                 continue
             if len(payload) >= 2 and payload[1] in CEC_ACTIVE_SOURCE_OPCODES:
+                opcode = payload[1]
                 if destination == 15:
-                    if own_physical and len(payload) >= 4 and payload[2:4] == own_physical:
+                    target_phys = (
+                        payload[4:6]
+                        if opcode == 0x80 and len(payload) >= 6
+                        else payload[2:4]
+                    )
+                    if own_physical and len(target_phys) == 2 and target_phys == own_physical:
                         apply_active(state, True)
-                    elif len(payload) >= 4:
+                    elif len(target_phys) == 2:
                         apply_active(state, False)
                     continue
                 apply_active(state, destination == own_la)
-        await process.wait()
-        if time.time() - started < 5:
+        rc = await process.wait()
+        if rc == 2 and monitor_cmd[-1] == "0":
+            monitor_cmd[-1] = "5"
+            continue
+        if time.time() - started < 2:
             LOG.warning("cec-ctl monitor exited immediately; retrying")
             await asyncio.sleep(10)
 

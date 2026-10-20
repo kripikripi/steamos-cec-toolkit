@@ -66,6 +66,7 @@ GAMEPAD_NAME_HINTS = (
     "controller",
     "dualsense",
     "dualshock",
+    "flydigi",
     "gamepad",
     "guitar",
     "joystick",
@@ -73,6 +74,7 @@ GAMEPAD_NAME_HINTS = (
     "playstation",
     "santroller",
     "shield",
+    "vader",
     "x-box",
     "xbox",
 )
@@ -335,7 +337,33 @@ def current_playback_logical_address() -> str:
     return fallback
 
 
+def valid_physical_address(value: str) -> bool:
+    return (
+        bool(re.fullmatch(r"[0-9a-fA-F]\.[0-9a-fA-F]\.[0-9a-fA-F]\.[0-9a-fA-F]", value))
+        and value.lower() != "f.f.f.f"
+    )
+
+
 def physical_address() -> str:
+    if os.path.exists(CEC_DEVICE):
+        try:
+            result = subprocess.run(
+                ["cec-ctl", "-d", CEC_DEVICE],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if "Physical Address" in line:
+                        candidate = line.split(":", 1)[-1].strip()
+                        if valid_physical_address(candidate):
+                            return candidate
+                        break
+        except Exception:
+            pass
     return CEC_PHYSICAL_ADDRESS
 
 
@@ -349,18 +377,20 @@ def physical_address_payload() -> str | None:
         return None
     if len(parts) != 4 or any(part < 0 or part > 15 for part in parts):
         return None
+    if parts == [15, 15, 15, 15]:
+        return None
     return f"0x{(parts[0] << 4) | parts[1]:02x}:0x{(parts[2] << 4) | parts[3]:02x}"
 
 
-def raw_active_source() -> None:
+def raw_active_source() -> bool:
     if not wait_for_cec_device():
         LOG.warning("CEC device %s is missing or not writable after waiting; cannot send ACTIVE_SOURCE", CEC_DEVICE)
-        return
+        return False
 
     active_source_payload = physical_address_payload()
     if not active_source_payload:
         LOG.warning("CEC_PHYSICAL_ADDRESS is not configured; skipping ACTIVE_SOURCE")
-        return
+        return False
 
     result = raw_cec([
         "-f",
@@ -372,12 +402,14 @@ def raw_active_source() -> None:
     ])
     if result.returncode != 0:
         LOG.warning("ACTIVE_SOURCE failed: %s", result.stdout.strip())
+        return False
+    return True
 
 
-def raw_wake() -> None:
+def raw_wake() -> bool:
     if not wait_for_cec_device():
         LOG.warning("CEC device %s is missing or not writable after waiting; cannot send raw wake", CEC_DEVICE)
-        return
+        return False
 
     playback_logical_address = current_playback_logical_address()
     if playback_logical_address != CEC_PLAYBACK_LOGICAL_ADDRESS:
@@ -404,12 +436,29 @@ def raw_wake() -> None:
             "cmd=0x0d",
         ],
     ]
+    any_ok = False
     for command in commands:
         result = raw_cec(command)
         if result.returncode != 0:
             LOG.warning("Raw CEC wake command failed: %s", result.stdout.strip())
+        else:
+            any_ok = True
         time.sleep(0.25)
-    raw_active_source()
+    if raw_active_source():
+        any_ok = True
+    return any_ok
+
+
+def cecd_available() -> bool:
+    result = subprocess.run(
+        ["busctl", "--user", "status", CEC_BUS],
+        text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=5,
+        check=False,
+    )
+    return result.returncode == 0
 
 
 def source_is_active() -> bool:
@@ -441,14 +490,25 @@ def mark_cec_activation_requested(reason: str) -> None:
 
 def activate_source(reason: str) -> None:
     with ACTIVATION_LOCK:
-        was_active = source_is_active()
+        has_cecd = cecd_available()
+        was_active = source_is_active() if has_cecd else False
         if was_active:
             LOG.info("CEC source reports active; still sending raw wake/input activation (%s)", reason)
 
         for attempt, delay in enumerate(CEC_WAKE_RETRY_DELAYS, start=1):
             if delay:
                 time.sleep(delay)
-            raw_wake()
+            raw_ok = raw_wake()
+            if not has_cecd:
+                if raw_ok:
+                    time.sleep(1.0)
+                    raw_active_source()
+                    mark_cec_activation_requested(reason)
+                    LOG.info("Woke display chain and activated HDMI source via raw CEC (%s, attempt %d)", reason, attempt)
+                    return
+                LOG.info("Raw CEC wake attempt %d did not succeed", attempt)
+                continue
+
             result = cec_wake()
             if result.returncode != 0:
                 LOG.warning(
@@ -469,14 +529,17 @@ def activate_source(reason: str) -> None:
 
         for delay in (2, 5, 8):
             time.sleep(delay)
-            raw_active_source()
+            if raw_active_source() and not has_cecd:
+                mark_cec_activation_requested(reason)
+                LOG.info("Activated HDMI source via raw CEC retry (%s)", reason)
+                return
 
         LOG.warning("Display wake/source activation did not complete after CEC retries")
 
 
 async def monitor_login1_resume() -> None:
     if BusType is None or MessageBus is None:
-        LOG.warning("dbus_next is missing; system resume CEC activation is disabled")
+        LOG.info("dbus_next is not installed; using clock-jump resume detection for CEC wake")
         return
 
     try:

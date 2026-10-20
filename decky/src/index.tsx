@@ -277,7 +277,14 @@ function DiagnosticsDetails({ status }: { status: Status | null }) {
       <div>USB wake helper: {yesNo(status.usb_wake_helper_exists)}</div>
       <div>Boot wake helper: {yesNo(status.boot_wake_script_exists)}</div>
       <div>Resume wake service: {status.resume_wake_helper_exists && status.resume_wake_unit_exists ? "OK" : "Missing"}</div>
-      <div>CEC permissions: {status.cec_device?.readable && status.cec_device?.writable ? "OK" : "Needs repair"}</div>
+      <div>
+        CEC permissions:{" "}
+        {!status.cec_device?.exists
+          ? "Adapter offline"
+          : status.cec_device.readable && status.cec_device.writable
+            ? "OK"
+            : "Needs repair"}
+      </div>
       <div>Sudoers: {yesNo(status.sudoers_exists)}</div>
       <div>CEC volume buttons: {status.external_volume?.enabled ? "On" : "Off"}</div>
       <div>Relative volume: {status.external_volume?.capabilities_ok ? "OK" : "Inactive"}</div>
@@ -290,6 +297,8 @@ function needsInstallHelp(status: Status | null): boolean {
   if (!status?.ok) {
     return false;
   }
+  const permissionMissing =
+    !!status.cec_device?.exists && (!status.cec_device.readable || !status.cec_device.writable);
   return (
     !status.root_helper_exists ||
     !status.debug_helper_exists ||
@@ -297,8 +306,7 @@ function needsInstallHelp(status: Status | null): boolean {
     !status.usb_wake_helper_exists ||
     !status.cec_permissions_helper_exists ||
     !status.boot_wake_script_exists ||
-    !status.cec_device?.readable ||
-    !status.cec_device?.writable ||
+    permissionMissing ||
     !status.sudoers_exists ||
     !status.volume_script_exists ||
     !status.external_volume_script_exists ||
@@ -332,7 +340,7 @@ function missingItems(status: Status | null): string[] {
   if (!status.cec_permissions_helper_exists) {
     items.push("CEC permissions helper");
   }
-  if (!status.cec_device?.readable || !status.cec_device?.writable) {
+  if (status.cec_device?.exists && (!status.cec_device?.readable || !status.cec_device?.writable)) {
     items.push("CEC device permissions");
   }
   if (!status.volume_script_exists) {
@@ -365,7 +373,7 @@ function InstallHelp({ status, busy, onRepairPermissions }: {
   onRepairPermissions: () => void;
 }) {
   const items = missingItems(status);
-  const command = "bash <(curl -fsSL https://github.com/Twsts/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh)";
+  const command = "bash <(curl -fsSL https://github.com/kripikripi/steamos-cec-toolkit/releases/latest/download/steamos-cec-toolkit-installer.sh)";
   const canRepairPermissions = !!status?.cec_permissions_helper_exists && !!status.cec_device?.exists;
   const permissionProblem = !!status?.cec_device?.exists && (!status.cec_device?.readable || !status.cec_device?.writable);
 

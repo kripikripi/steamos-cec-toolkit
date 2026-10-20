@@ -112,6 +112,7 @@ GAMEPAD_NAME_HINTS = (
     "controller",
     "dualsense",
     "dualshock",
+    "flydigi",
     "gamepad",
     "guitar",
     "joystick",
@@ -119,6 +120,7 @@ GAMEPAD_NAME_HINTS = (
     "playstation",
     "santroller",
     "shield",
+    "vader",
     "x-box",
     "xbox",
 )
@@ -134,6 +136,18 @@ NON_GAMEPAD_NAME_HINTS = (
 )
 
 
+def subprocess_env() -> dict[str, str]:
+    env = dict(os.environ)
+    uid = os.getuid()
+    runtime_dir = env.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
+    if Path(runtime_dir).is_dir():
+        env.setdefault("XDG_RUNTIME_DIR", runtime_dir)
+        bus_path = Path(runtime_dir) / "bus"
+        if bus_path.exists():
+            env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path={bus_path}")
+    return env
+
+
 def run(command: list[str], timeout: int = 8) -> dict[str, Any]:
     try:
         process = subprocess.run(
@@ -143,6 +157,7 @@ def run(command: list[str], timeout: int = 8) -> dict[str, Any]:
             text=True,
             timeout=timeout,
             check=False,
+            env=subprocess_env(),
         )
         return {
             "returncode": process.returncode,
@@ -439,7 +454,15 @@ def discover_audio() -> dict[str, Any]:
 
     cards: list[dict[str, str]] = []
     routes: list[str] = []
+    active_routes: list[str] = []
+    available_routes: list[str] = []
     route_pattern = re.compile(r"hdmi-output-\d+")
+    hdmi_card_names: set[str] = set()
+
+    def add_route(route: str, target: list[str]) -> None:
+        if route and route not in target:
+            target.append(route)
+
     if isinstance(objects, list):
         for item in objects:
             props = object_props(item)
@@ -447,13 +470,35 @@ def discover_audio() -> dict[str, Any]:
             joined = " ".join(values)
             parent = str(props.get("device.name", ""))
             if parent.startswith("alsa_card.") and route_pattern.search(joined):
-                routes_matches = set(route_pattern.findall(joined))
-                if routes_matches:
-                    routes.extend(route for route in routes_matches if route not in routes)
+                for route in route_pattern.findall(joined):
+                    add_route(route, routes)
+                hdmi_card_names.add(parent)
+
+            info = item.get("info", {})
+            params = info.get("params", {}) if isinstance(info, dict) else {}
+            if isinstance(params, dict):
+                for route_entry in params.get("Route", []) or []:
+                    if not isinstance(route_entry, dict):
+                        continue
+                    route_name = str(route_entry.get("name", ""))
+                    if route_pattern.fullmatch(route_name):
+                        add_route(route_name, routes)
+                        add_route(route_name, active_routes)
+                        if parent.startswith("alsa_card."):
+                            hdmi_card_names.add(parent)
+                for route_entry in params.get("EnumRoute", []) or []:
+                    if not isinstance(route_entry, dict):
+                        continue
+                    route_name = str(route_entry.get("name", ""))
+                    if route_pattern.fullmatch(route_name):
+                        add_route(route_name, routes)
+                        if route_entry.get("available") == "yes":
+                            add_route(route_name, available_routes)
+                        if parent.startswith("alsa_card."):
+                            hdmi_card_names.add(parent)
 
     # A card that owns an hdmi-output-* route is HDMI-capable even when its nick
     # (e.g. "HDA AMD AMD RX 9070 XT") does not mention HDMI explicitly.
-    hdmi_card_names: set[str] = set()
     if isinstance(objects, list):
         for item in objects:
             props = object_props(item)
@@ -492,6 +537,7 @@ def discover_audio() -> dict[str, Any]:
                     }
                 )
 
+    routes.sort(key=lambda r: int(r.rsplit("-", 1)[-1]) if r.rsplit("-", 1)[-1].isdigit() else 999)
     if not routes:
         routes = [fallback["EXTERNAL_VOLUME_ROUTE"]]
 
@@ -500,10 +546,20 @@ def discover_audio() -> dict[str, Any]:
     if suggested_card is None and cards:
         suggested_card = cards[0]
 
+    user_configured_route = read_config_file(USER_CONFIG_FILE).get("EXTERNAL_VOLUME_ROUTE", "")
+    if user_configured_route and user_configured_route in routes:
+        suggested_route = user_configured_route
+    elif active_routes:
+        suggested_route = active_routes[0]
+    elif available_routes:
+        suggested_route = available_routes[0]
+    else:
+        suggested_route = routes[0]
+
     suggested = {
         "HDMI_ALSA_CARD_NAME": (suggested_card or {}).get("name", fallback["HDMI_ALSA_CARD_NAME"]),
         "HDMI_ALSA_CARD_NICK": (suggested_card or {}).get("nick", fallback["HDMI_ALSA_CARD_NICK"]),
-        "EXTERNAL_VOLUME_ROUTE": routes[0],
+        "EXTERNAL_VOLUME_ROUTE": suggested_route,
     }
     note = ""
     if len(cards) > 1:
@@ -514,6 +570,8 @@ def discover_audio() -> dict[str, Any]:
     if cards:
         try:
             write_user_config(suggested)
+            if WIREPLUMBER_CONFIG.exists():
+                write_external_volume_files()
         except ValueError:
             pass
 
@@ -848,8 +906,24 @@ def set_config(updates: dict[str, str]) -> dict[str, Any]:
     if (
         "INPUT_INACTIVE_SUSPEND_DELAY_SECONDS" in updates
         or "INPUT_AWAY_SUSPEND_DELAY_SECONDS" in updates
+        or "CEC_PHYSICAL_ADDRESS" in updates
+        or "CEC_DEVICE" in updates
     ):
         systemctl_user("try-restart", USER_SERVICES["input-away-suspend"])
+    if "CEC_DEVICE" in updates or "CEC_PHYSICAL_ADDRESS" in updates:
+        for service_key in ("tv-standby", "gamescope-recovery", "steam-button"):
+            systemctl_user("try-restart", USER_SERVICES[service_key])
+    if (
+        "HDMI_ALSA_CARD_NAME" in updates
+        or "HDMI_ALSA_CARD_NICK" in updates
+        or "EXTERNAL_VOLUME_ROUTE" in updates
+    ):
+        if WIREPLUMBER_CONFIG.exists():
+            write_external_volume_files()
+            systemctl_user("stop", "steamos-cec-external-volume.service")
+            systemctl_user("start", "steamos-cec-external-volume.socket")
+            systemctl_user("start", "steamos-cec-external-volume.service")
+            systemctl_user("restart", "wireplumber.service")
     payload = status()
     payload["action"] = {"ok": True, "returncode": 0, "stdout": str(USER_CONFIG_FILE)}
     return payload
@@ -857,6 +931,11 @@ def set_config(updates: dict[str, str]) -> dict[str, Any]:
 
 def physical_address_payload(config: dict[str, str]) -> str:
     physical = config.get("CEC_PHYSICAL_ADDRESS", "")
+    if not valid_physical_address(physical):
+        cec_device = config.get("CEC_DEVICE", "/dev/cec0")
+        live = run(["cec-ctl", "-d", cec_device, "-s", "--physical-address"], timeout=5)
+        if live["ok"] and valid_physical_address(live["stdout"]):
+            physical = live["stdout"]
     if not physical:
         return ""
     try:
@@ -954,10 +1033,23 @@ def wake_tv() -> dict[str, Any]:
             "Wake",
         ]
     )
+    ok = result["ok"] or any(raw_result["ok"] for raw_result in raw_results)
+    if ok:
+        marker = Path(
+            config.get(
+                "CEC_ACTIVATION_MARKER",
+                f"/run/user/{os.getuid()}/steamos-cec-toolkit/last-cec-activation",
+            )
+        )
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.touch()
+        except OSError:
+            pass
     payload = status()
     payload["action"] = {
-        "ok": result["ok"] or any(raw_result["ok"] for raw_result in raw_results),
-        "returncode": result["returncode"],
+        "ok": ok,
+        "returncode": 0 if ok else result["returncode"],
         "stdout": "\n".join(
             [raw_result["stdout"] for raw_result in raw_results if raw_result["stdout"]]
             + ([result["stdout"]] if result["stdout"] else [])
@@ -1011,6 +1103,7 @@ def standby_tv() -> dict[str, Any]:
 def restart_external_volume() -> dict[str, Any]:
     systemctl_user("stop", "steamos-cec-external-volume.service")
     systemctl_user("start", "steamos-cec-external-volume.socket")
+    systemctl_user("start", "steamos-cec-external-volume.service")
     systemctl_user("restart", "wireplumber.service")
     return status()
 
@@ -1060,10 +1153,12 @@ def set_external_volume(enabled: bool) -> dict[str, Any]:
         systemctl_user("daemon-reload")
         systemctl_user("stop", "steamos-cec-external-volume.service")
         systemctl_user("start", "steamos-cec-external-volume.socket")
+        systemctl_user("start", "steamos-cec-external-volume.service")
         systemctl_user("restart", "pipewire.service")
         systemctl_user("restart", "pipewire-pulse.service")
         systemctl_user("restart", "wireplumber.service")
         systemctl_user("start", "steamos-cec-external-volume.socket")
+        systemctl_user("start", "steamos-cec-external-volume.service")
     else:
         remove_external_volume_files()
         systemctl_user("daemon-reload")

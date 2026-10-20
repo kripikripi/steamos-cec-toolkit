@@ -6,6 +6,13 @@ if [[ -r "$CONFIG_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
 fi
+STEAMOS_CEC_USER="${STEAMOS_CEC_USER:-deck}"
+USER_HOME="$(getent passwd "$STEAMOS_CEC_USER" 2>/dev/null | cut -d: -f6 || true)"
+USER_CONFIG="${STEAMOS_CEC_USER_CONFIG:-${USER_HOME:-/home/$STEAMOS_CEC_USER}/.config/steamos-cec-toolkit/config.conf}"
+if [[ -r "$USER_CONFIG" ]]; then
+  # shellcheck disable=SC1090
+  source "$USER_CONFIG"
+fi
 
 USB_WAKE_MATCH="${USB_WAKE_MATCH:-bluetooth|steam controller|xbox|playstation|dualsense|dualshock|8bitdo|nintendo|shield|santroller|flydigi|vader}"
 USB_WAKE_EXCLUDE="${USB_WAKE_EXCLUDE:-hub|host controller|keyboard|mouse|touchpad|aura|audio}"

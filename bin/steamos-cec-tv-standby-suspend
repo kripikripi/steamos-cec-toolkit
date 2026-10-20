@@ -48,17 +48,19 @@ if not _cec_user_home.startswith("/"):
 USER_CONFIG = f"{_cec_user_home}/.config/steamos-cec-toolkit/config.conf"
 CONFIG = {**SYSTEM_CONFIG, **read_config(USER_CONFIG)}
 TV_LOGICAL_ADDRESS = int(CONFIG.get("TV_LOGICAL_ADDRESS", "0"), 0)
+CEC_PLAYBACK_LOGICAL_ADDRESS = int(CONFIG.get("CEC_PLAYBACK_LOGICAL_ADDRESS", "4"), 0)
 CEC_STANDBY_OPCODE = int(CONFIG.get("CEC_STANDBY_OPCODE", "0x36"), 0)
+CEC_REPORT_POWER_STATUS_OPCODE = 0x90
 CEC_DEVICE = CONFIG.get("CEC_DEVICE", "/dev/cec0")
 CEC_MONITOR_COMMAND = (
     "sudo",
     "-n",
     "/var/lib/steamos-cec-toolkit/steamos-cec-debug-monitor",
-    "5",
+    "0",
 )
 
 MONITOR_HEADER_RE = re.compile(
-    r"^(?:Received from|Transmitted by)\b.*\((\d+) to (\d+)\):"
+    r"(?:Received from|Transmitted by)\b.*\((\d+) to (\d+)\):"
 )
 
 
@@ -94,7 +96,7 @@ async def monitor_cecd() -> None:
     def received_message(source, destination, _timestamp, payload):
         if (
             source == TV_LOGICAL_ADDRESS
-            and destination == 15
+            and destination in {15, CEC_PLAYBACK_LOGICAL_ADDRESS}
             and payload
             and payload[0] == CEC_STANDBY_OPCODE
         ):
@@ -115,15 +117,21 @@ async def monitor_raw() -> None:
     cec-ctl --monitor-all --show-raw prints a header line such as
     'Received from TV to all (0 to 15): ...' followed by a '\tRaw: 0x..' line.
     """
-    if not cec_device_exists():
-        LOG.error("No CEC device at %s and cecd is unavailable; waiting" % CEC_DEVICE)
+    warned_missing = False
+    tv_power_was_on = False
+    monitor_cmd = list(CEC_MONITOR_COMMAND)
     while True:
         if not cec_device_exists():
+            if not warned_missing:
+                LOG.error("No CEC device at %s and cecd is unavailable; waiting", CEC_DEVICE)
+                warned_missing = True
             await asyncio.sleep(10)
             continue
+        warned_missing = False
+        LOG.info("Monitoring HDMI-CEC TV standby via cec-ctl raw monitor on %s", CEC_DEVICE)
         started = time.time()
         process = await asyncio.create_subprocess_exec(
-            *CEC_MONITOR_COMMAND,
+            *monitor_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -145,16 +153,31 @@ async def monitor_raw() -> None:
                 payload = [int(token, 16) for token in tokens]
             except ValueError:
                 continue
-            if source == TV_LOGICAL_ADDRESS and destination == 15 and len(payload) >= 2:
+            if source == TV_LOGICAL_ADDRESS and len(payload) >= 2:
                 opcode = payload[1]
-                if opcode == CEC_STANDBY_OPCODE:
+                if destination in {15, CEC_PLAYBACK_LOGICAL_ADDRESS} and opcode == CEC_STANDBY_OPCODE:
+                    tv_power_was_on = False
                     if local_suspend_in_progress():
                         LOG.info("Ignoring TV standby caused by local suspend")
                         continue
                     LOG.info("TV broadcast standby; suspending (raw monitor)")
                     asyncio.create_task(suspend())
-        await process.wait()
-        if time.time() - started < 5:
+                elif opcode == CEC_REPORT_POWER_STATUS_OPCODE and len(payload) >= 3:
+                    pwr_state = payload[2]
+                    if pwr_state == 0x00:
+                        tv_power_was_on = True
+                    elif pwr_state in {0x01, 0x03} and tv_power_was_on:
+                        tv_power_was_on = False
+                        if local_suspend_in_progress():
+                            LOG.info("Ignoring TV power standby report caused by local suspend")
+                            continue
+                        LOG.info("TV power transitioned to standby; suspending (raw monitor)")
+                        asyncio.create_task(suspend())
+        rc = await process.wait()
+        if rc == 2 and monitor_cmd[-1] == "0":
+            monitor_cmd[-1] = "5"
+            continue
+        if time.time() - started < 2:
             LOG.warning("cec-ctl monitor exited immediately; pausing before retry")
             await asyncio.sleep(10)
 

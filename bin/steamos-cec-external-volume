@@ -93,16 +93,21 @@ error ExpectedMore()
 
 def read_config(path: str) -> dict[str, str]:
     config: dict[str, str] = {}
-    try:
-        with open(path, encoding="utf-8") as file:
-            for raw_line in file:
-                line = raw_line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                config[key.strip()] = value.strip().strip('"').strip("'")
-    except FileNotFoundError:
-        pass
+    paths = [Path(path)]
+    user_config = Path.home() / ".config/steamos-cec-toolkit/config.conf"
+    if user_config not in paths:
+        paths.append(user_config)
+    for config_path in paths:
+        try:
+            with config_path.open(encoding="utf-8") as file:
+                for raw_line in file:
+                    line = raw_line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    config[key.strip()] = value.strip().strip('"').strip("'")
+        except FileNotFoundError:
+            pass
     return config
 
 
@@ -195,6 +200,11 @@ def service_info() -> dict[str, Any]:
 
 
 def capabilities(route: str) -> dict[str, Any]:
+    routes = [route]
+    for idx in range(8):
+        candidate = f"hdmi-output-{idx}"
+        if candidate not in routes:
+            routes.append(candidate)
     return {
         "parameters": {
             "readVolume": True,
@@ -214,7 +224,7 @@ def capabilities(route: str) -> dict[str, Any]:
             "readMute": False,
             "writeMuteValue": False,
             "writeMuteToggle": True,
-            "routes": [route],
+            "routes": routes,
         }
     }
 
@@ -223,6 +233,7 @@ class Server:
     def __init__(self, worker: VolumeWorker, route: str) -> None:
         self.worker = worker
         self.route = route
+        self.varlink_write_seen = False
 
     def handle_call(self, conn: socket.socket, msg: dict[str, Any]) -> None:
         method = msg.get("method")
@@ -253,6 +264,7 @@ class Server:
             return
 
         if method == "org.pipewire.ExternalVolume.WriteVolumeAbsolute":
+            self.varlink_write_seen = True
             try:
                 volume = float(params.get("volume"))
             except (TypeError, ValueError):
@@ -269,6 +281,7 @@ class Server:
             return
 
         if method == "org.pipewire.ExternalVolume.WriteVolumeRelative":
+            self.varlink_write_seen = True
             try:
                 step = float(params.get("step", 0.0))
             except (TypeError, ValueError):
@@ -287,16 +300,145 @@ class Server:
             return
 
         if method == "org.pipewire.ExternalVolume.WriteMuteValue":
+            self.varlink_write_seen = True
             self.worker.enqueue("mute")
             send_reply(conn, {"parameters": {}})
             return
 
         if method == "org.pipewire.ExternalVolume.WriteMuteToggle":
+            self.varlink_write_seen = True
             self.worker.enqueue("mute")
             send_reply(conn, {"parameters": {}})
             return
 
         send_error(conn, "org.varlink.service.MethodNotFound")
+
+
+def _query_hdmi_sinks(hdmi_card_name: str) -> dict[str, tuple[int, bool]]:
+    result = subprocess.run(
+        ["pactl", "-f", "json", "list", "sinks"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return {}
+    try:
+        sinks = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(sinks, list):
+        return {}
+
+    matched: dict[str, tuple[int, bool]] = {}
+    for sink in sinks:
+        if not isinstance(sink, dict):
+            continue
+        name = str(sink.get("name", ""))
+        props = sink.get("properties") or {}
+        device_name = str(props.get("device.name", "")) if isinstance(props, dict) else ""
+        if hdmi_card_name and device_name == hdmi_card_name:
+            is_match = True
+        elif "hdmi" in name.lower():
+            is_match = True
+        else:
+            is_match = False
+        if not is_match:
+            continue
+
+        vol_obj = sink.get("volume") or {}
+        perc_list: list[int] = []
+        if isinstance(vol_obj, dict):
+            for ch in vol_obj.values():
+                if isinstance(ch, dict):
+                    raw_pct = str(ch.get("value_percent", "")).strip().rstrip("%")
+                    if raw_pct.isdigit():
+                        perc_list.append(int(raw_pct))
+        if not perc_list:
+            continue
+        avg_vol = int(round(sum(perc_list) / len(perc_list)))
+        mute = bool(sink.get("mute", False))
+        matched[name] = (avg_vol, mute)
+    return matched
+
+
+def monitor_pipewire_sinks(worker: VolumeWorker, server: Server, config_path: str) -> None:
+    """Fallback volume monitor for distros without Valve's WirePlumber ExternalVolume patch."""
+    import time
+
+    while not server.varlink_write_seen:
+        config = read_config(config_path)
+        hdmi_card_name = config.get("HDMI_ALSA_CARD_NAME", "")
+        prev_state = _query_hdmi_sinks(hdmi_card_name)
+        try:
+            proc = subprocess.Popen(
+                ["pactl", "subscribe"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+        except FileNotFoundError:
+            return
+        except Exception as error:
+            log(f"pactl subscribe failed: {error}")
+            time.sleep(5)
+            continue
+
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                if server.varlink_write_seen:
+                    break
+                if "'change' on sink " not in line:
+                    continue
+                current_state = _query_hdmi_sinks(hdmi_card_name)
+                for sink_name, (vol, mute) in current_state.items():
+                    if sink_name not in prev_state:
+                        prev_state[sink_name] = (vol, mute)
+                        continue
+                    prev_vol, prev_mute = prev_state[sink_name]
+                    if mute != prev_mute:
+                        prev_state[sink_name] = (vol, mute)
+                        worker.enqueue("mute")
+                        continue
+                    delta = vol - prev_vol
+                    if delta == 0:
+                        continue
+                    steps = max(1, min(abs(delta) // 5, 5))
+                    action = "up" if delta > 0 else "down"
+                    for _ in range(steps):
+                        worker.enqueue(action)
+                    if vol >= 98:
+                        subprocess.run(
+                            ["pactl", "set-sink-volume", sink_name, "75%"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=3,
+                            check=False,
+                        )
+                        prev_state[sink_name] = (75, mute)
+                    elif vol <= 2:
+                        subprocess.run(
+                            ["pactl", "set-sink-volume", sink_name, "25%"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=3,
+                            check=False,
+                        )
+                        prev_state[sink_name] = (25, mute)
+                    else:
+                        prev_state[sink_name] = (vol, mute)
+        except Exception:
+            traceback.print_exc(file=sys.stderr)
+        finally:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+        time.sleep(2)
 
 
 def serve_connection(conn: socket.socket, server: Server) -> None:
@@ -378,6 +520,12 @@ def main() -> int:
 
     worker = VolumeWorker(volume_cmd)
     server = Server(worker, route)
+    monitor_thread = threading.Thread(
+        target=monitor_pipewire_sinks,
+        args=(worker, server, args.config),
+        daemon=True,
+    )
+    monitor_thread.start()
 
     try:
         if args.listen:

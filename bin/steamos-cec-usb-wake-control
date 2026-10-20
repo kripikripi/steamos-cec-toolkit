@@ -12,14 +12,16 @@ case "${1:-}" in
       exit 1
     fi
     systemctl daemon-reload
+    systemctl reset-failed "$UNIT" >/dev/null 2>&1 || true
     "$HELPER" on >/dev/null
-    systemctl enable "$UNIT"
+    systemctl enable --now "$UNIT"
     ;;
   off)
     if [[ -x "$HELPER" ]]; then
       "$HELPER" off >/dev/null || true
     fi
-    systemctl disable "$UNIT" >/dev/null 2>&1 || true
+    systemctl disable --now "$UNIT" >/dev/null 2>&1 || true
+    systemctl reset-failed "$UNIT" >/dev/null 2>&1 || true
     systemctl daemon-reload
     ;;
   status)
