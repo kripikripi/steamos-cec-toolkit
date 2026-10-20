@@ -138,34 +138,62 @@ def send_error(
 class VolumeWorker:
     def __init__(self, command: str) -> None:
         self.command = command
-        self.actions: queue.Queue[str] = queue.Queue()
+        self.cond = threading.Condition()
+        self.pending_steps = 0
+        self.pending_mute = False
+        self.supports_batch_arg = True
         self.volume = 50.0
         self.volume_lock = threading.Lock()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
-    def enqueue(self, action: str) -> None:
-        self.actions.put(action)
+    def enqueue(self, action: str, count: int = 1) -> None:
+        if count < 1:
+            return
+        with self.cond:
+            if action == "mute":
+                self.pending_mute = True
+            elif action == "up":
+                if self.pending_steps < 0:
+                    self.pending_steps = count
+                else:
+                    self.pending_steps = min(self.pending_steps + count, 16)
+            elif action == "down":
+                if self.pending_steps > 0:
+                    self.pending_steps = -count
+                else:
+                    self.pending_steps = max(self.pending_steps - count, -16)
+            self.cond.notify()
 
     def set_volume(self, target: float) -> None:
         target = max(0.0, min(100.0, target))
         with self.volume_lock:
             delta = int(round(target - self.volume))
             self.volume = target
-        action = "up" if delta > 0 else "down"
-        for _ in range(abs(delta)):
-            self.enqueue(action)
+        if delta != 0:
+            self.enqueue("up" if delta > 0 else "down", abs(delta))
 
     def get_volume(self) -> float:
         with self.volume_lock:
             return self.volume
 
-    def _run(self) -> None:
-        while True:
-            action = self.actions.get()
-            try:
-                log(f"CEC volume action: {action}")
-                result = subprocess.run(
+    def _run_cmd(self, action: str, count: int = 1) -> None:
+        cmd = [self.command, action]
+        if count > 1 and self.supports_batch_arg:
+            cmd.append(str(count))
+        log(f"CEC volume action: {action} x{count}")
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode == 2 and count > 1 and self.supports_batch_arg:
+            self.supports_batch_arg = False
+            for _ in range(count):
+                subprocess.run(
                     [self.command, action],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -173,15 +201,33 @@ class VolumeWorker:
                     timeout=8,
                     check=False,
                 )
-                if result.returncode != 0:
-                    log(
-                        "CEC volume command failed "
-                        f"({result.returncode}): {result.stdout.strip()}"
-                    )
+        elif result.returncode != 0:
+            log(
+                "CEC volume command failed "
+                f"({result.returncode}): {result.stdout.strip()}"
+            )
+
+    def _run(self) -> None:
+        while True:
+            with self.cond:
+                while not self.pending_mute and self.pending_steps == 0:
+                    self.cond.wait()
+                if self.pending_mute:
+                    self.pending_mute = False
+                    action = "mute"
+                    batch = 1
+                elif self.pending_steps > 0:
+                    batch = min(self.pending_steps, 4)
+                    self.pending_steps -= batch
+                    action = "up"
+                else:
+                    batch = min(-self.pending_steps, 4)
+                    self.pending_steps += batch
+                    action = "down"
+            try:
+                self._run_cmd(action, batch)
             except Exception:
                 traceback.print_exc(file=sys.stderr)
-            finally:
-                self.actions.task_done()
 
 
 def service_info() -> dict[str, Any]:
@@ -406,11 +452,14 @@ def monitor_pipewire_sinks(worker: VolumeWorker, server: Server, config_path: st
                     delta = vol - prev_vol
                     if delta == 0:
                         continue
-                    steps = max(1, min(abs(delta) // 5, 5))
+                    try:
+                        step_mult = float(config.get("CEC_VOLUME_STEP_MULTIPLIER", "0.6"))
+                    except ValueError:
+                        step_mult = 0.6
+                    steps = max(1, min(int(round(abs(delta) * step_mult)), 10))
                     action = "up" if delta > 0 else "down"
-                    for _ in range(steps):
-                        worker.enqueue(action)
-                    if vol >= 98:
+                    worker.enqueue(action, steps)
+                    if vol >= 90:
                         subprocess.run(
                             ["pactl", "set-sink-volume", sink_name, "75%"],
                             stdout=subprocess.DEVNULL,
@@ -419,7 +468,7 @@ def monitor_pipewire_sinks(worker: VolumeWorker, server: Server, config_path: st
                             check=False,
                         )
                         prev_state[sink_name] = (75, mute)
-                    elif vol <= 2:
+                    elif vol <= 10:
                         subprocess.run(
                             ["pactl", "set-sink-volume", sink_name, "25%"],
                             stdout=subprocess.DEVNULL,

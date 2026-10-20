@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Run directly when the user already has rw access to the CEC device via uaccess ACL,
+# avoiding sudo/PAM overhead on every volume step.
+CONFIG_FILE="${STEAMOS_CEC_CONFIG:-/etc/steamos-cec-toolkit.conf}"
+USER_CONFIG="${HOME}/.config/steamos-cec-toolkit/config.conf"
+CEC_DEV="/dev/cec0"
+if [[ -r "$USER_CONFIG" ]]; then
+  val="$(sed -n 's/^CEC_DEVICE=//p' "$USER_CONFIG" | tail -n1 | tr -d "\"'")"
+  [[ -n "$val" ]] && CEC_DEV="$val"
+elif [[ -r "$CONFIG_FILE" ]]; then
+  val="$(sed -n 's/^CEC_DEVICE=//p' "$CONFIG_FILE" | tail -n1 | tr -d "\"'")"
+  [[ -n "$val" ]] && CEC_DEV="$val"
+fi
+
+if [[ -r "$CEC_DEV" && -w "$CEC_DEV" ]]; then
+  exec /var/lib/steamos-cec-toolkit/steamos-cec-volume-raw "$@"
+fi
+
 exec sudo -n /var/lib/steamos-cec-toolkit/steamos-cec-volume-raw "$@"

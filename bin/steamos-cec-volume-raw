@@ -8,8 +8,12 @@ if [[ -r "$CONFIG_FILE" ]]; then
 fi
 
 STEAMOS_CEC_USER="${STEAMOS_CEC_USER:-deck}"
-CEC_USER_HOME="$(getent passwd "$STEAMOS_CEC_USER" 2>/dev/null | cut -d: -f6)"
-: "${CEC_USER_HOME:=/home/$STEAMOS_CEC_USER}"
+if [[ -n "${HOME:-}" && "$HOME" != "/root" && -r "$HOME/.config/steamos-cec-toolkit/config.conf" ]]; then
+  CEC_USER_HOME="$HOME"
+else
+  CEC_USER_HOME="$(getent passwd "$STEAMOS_CEC_USER" 2>/dev/null | cut -d: -f6)"
+  : "${CEC_USER_HOME:=/home/$STEAMOS_CEC_USER}"
+fi
 USER_CONFIG="$CEC_USER_HOME/.config/steamos-cec-toolkit/config.conf"
 if [[ -r "$USER_CONFIG" ]]; then
   # shellcheck disable=SC1090
@@ -19,7 +23,7 @@ fi
 CEC_DEVICE="${CEC_DEVICE:-/dev/cec0}"
 CEC_VOLUME_INITIATOR="${CEC_VOLUME_INITIATOR:-}"
 CEC_AUDIO_LOGICAL_ADDRESS="${CEC_AUDIO_LOGICAL_ADDRESS:-0}"
-CEC_VOLUME_PRESS_SECONDS="${CEC_VOLUME_PRESS_SECONDS:-0.25}"
+CEC_VOLUME_PRESS_SECONDS="${CEC_VOLUME_PRESS_SECONDS:-0}"
 CEC_SIMPLINK_ACK="${CEC_SIMPLINK_ACK:-0}"
 CEC_SIMPLINK_PAYLOAD="${CEC_SIMPLINK_PAYLOAD:-0x02:0x05}"
 CEC_SIMPLINK_VENDOR_ID="${CEC_SIMPLINK_VENDOR_ID:-0x00e091}"
@@ -28,8 +32,18 @@ case "${1:-}" in
   up) uicmd="volume-up" ;;
   down) uicmd="volume-down" ;;
   mute) uicmd="mute" ;;
-  *) echo "usage: $0 up|down|mute" >&2; exit 2 ;;
+  *) echo "usage: $0 up|down|mute [count]" >&2; exit 2 ;;
 esac
+
+count="${2:-1}"
+if ! [[ "$count" =~ ^[0-9]+$ ]] || (( count < 1 )); then
+  count=1
+elif (( count > 10 )); then
+  count=10
+fi
+if [[ "$uicmd" == "mute" ]]; then
+  count=1
+fi
 
 # Some receivers only accept TV-originated volume. When an explicit initiator
 # is configured we must use --raw-msg, which bypasses kernel validation. An
@@ -59,8 +73,16 @@ if [[ "$CEC_SIMPLINK_ACK" == "1" ]]; then
     >/dev/null 2>&1 || true
 fi
 
-/usr/bin/cec-ctl "${tx_args[@]}" --user-control-pressed ui-cmd="$uicmd"
-
-sleep "$CEC_VOLUME_PRESS_SECONDS"
-
-/usr/bin/cec-ctl "${tx_args[@]}" --user-control-released
+if [[ "$CEC_VOLUME_PRESS_SECONDS" == "0" || "$CEC_VOLUME_PRESS_SECONDS" == "0.0" || "$CEC_VOLUME_PRESS_SECONDS" == "0.25" ]]; then
+  cmd_args=()
+  for (( i = 0; i < count; i++ )); do
+    cmd_args+=(--user-control-pressed "ui-cmd=$uicmd" --user-control-released)
+  done
+  /usr/bin/cec-ctl "${tx_args[@]}" "${cmd_args[@]}"
+else
+  for (( i = 0; i < count; i++ )); do
+    /usr/bin/cec-ctl "${tx_args[@]}" --user-control-pressed ui-cmd="$uicmd"
+    sleep "$CEC_VOLUME_PRESS_SECONDS"
+    /usr/bin/cec-ctl "${tx_args[@]}" --user-control-released
+  done
+fi
