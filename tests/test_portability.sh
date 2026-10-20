@@ -21,10 +21,12 @@ bash -n "$ROOT/easy-install.sh"
 bash -n "$ROOT/bin/steamos-cec-adapter-config"
 bash -n "$ROOT/bin/steamos-cec-pactl-wrapper"
 bash -n "$ROOT/bin/steamos-cec-wpctl-wrapper"
+bash -n "$ROOT/bin/steamos-cec-usb-wake-apply"
 python3 -m py_compile \
   "$ROOT/bin/steamos-cec-tv-standby-suspend" \
   "$ROOT/bin/steamos-cec-input-away-suspend" \
-  "$ROOT/bin/steamos-cec-gamescope-recovery"
+  "$ROOT/bin/steamos-cec-gamescope-recovery" \
+  "$ROOT/bin/steamos-cec-steam-button"
 
 for required in "$ROOT/systemd/system/steamos-cec-adapter-config.service" "$ROOT/udev/99-steamos-cec-adapter-config.rules" "$ROOT/bin/steamos-cec-adapter-config"; do
   if [[ ! -f "$required" ]]; then

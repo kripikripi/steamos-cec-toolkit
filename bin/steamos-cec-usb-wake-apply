@@ -17,10 +17,11 @@ fi
 USB_WAKE_MATCH="${USB_WAKE_MATCH:-bluetooth|steam controller|xbox|playstation|dualsense|dualshock|8bitdo|nintendo|shield|santroller|flydigi|vader}"
 USB_WAKE_EXCLUDE="${USB_WAKE_EXCLUDE:-hub|host controller|keyboard|mouse|touchpad|aura|audio}"
 USB_WAKE_USB_IDS="${USB_WAKE_USB_IDS:-8087:0032}"
-USB_WAKE_BUILTIN_USB_IDS="045e:028e"
+USB_WAKE_BUILTIN_USB_IDS="045e:028e 04b4:2412"
 USB_WAKE_EXCLUDE_USB_IDS="${USB_WAKE_EXCLUDE_USB_IDS:-8087:0029}"
 USB_WAKE_BLUETOOTH_CLASS="${USB_WAKE_BLUETOOTH_CLASS:-0}"
 USB_WAKE_STATE_FILE="${USB_WAKE_STATE_FILE:-/var/lib/steamos-cec-toolkit/usb-wake-state}"
+USB_WAKE_PARENTS_FILE="${USB_WAKE_PARENTS_FILE:-/var/lib/steamos-cec-toolkit/usb-wake-parents}"
 USB_WAKE_STATE="${1:-on}"
 USB_WAKE_MATCH="${USB_WAKE_MATCH}|controller|flydigi|vader"
 
@@ -91,7 +92,7 @@ if [[ "$target_state" == "restore" ]]; then
         "$(json_escape "$after")")")
     done < "$USB_WAKE_STATE_FILE"
   fi
-  rm -f "$USB_WAKE_STATE_FILE"
+  rm -f "$USB_WAKE_STATE_FILE" "$USB_WAKE_PARENTS_FILE"
   printf '{"ok":true,"matched":%d,"changed":%d,"devices":[' "$matched" "$changed"
   separator=""
   for item in "${items[@]}"; do
@@ -154,32 +155,59 @@ for wakeup in /sys/bus/usb/devices/*/power/wakeup; do
     "$(json_escape "$after")")")
 done
 
-# Some USB HID receivers expose no power/wakeup file themselves. Match them by
-# USB ID and enable the wake-capable hub/controller parents instead.
+# Some USB HID receivers expose no power/wakeup file themselves (and some, like
+# the Flydigi Vader 4 Pro 2.4GHz dongle, disconnect from USB when the controller
+# sleeps and reconnect on the parent hub port when Home is pressed). Match them
+# by USB ID or product/manufacturer name, remember their parent hub path across
+# disconnects, and enable wake on the parent hub/controller chain.
 for device_dir in /sys/bus/usb/devices/*; do
   [[ -r "$device_dir/idVendor" && -r "$device_dir/idProduct" ]] || continue
   [[ ! -e "$device_dir/power/wakeup" ]] || continue
   usb_id="$(cat "$device_dir/idVendor")":"$(cat "$device_dir/idProduct")"
-  if [[ ! " $USB_WAKE_BUILTIN_USB_IDS " =~ " $usb_id " ]]; then
+  product="$(cat "$device_dir/product" 2>/dev/null || true)"
+  manufacturer="$(cat "$device_dir/manufacturer" 2>/dev/null || true)"
+  label="$(printf '%s %s' "$manufacturer" "$product" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  label_lower="$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]')"
+
+  if [[ ! " $USB_WAKE_BUILTIN_USB_IDS " =~ " $usb_id " &&
+    ! " $USB_WAKE_USB_IDS " =~ " $usb_id " &&
+    ! "$label_lower" =~ $USB_WAKE_MATCH ]]; then
+    continue
+  fi
+  if [[ "$label_lower" =~ $USB_WAKE_EXCLUDE ]]; then
     continue
   fi
   if [[ " $USB_WAKE_EXCLUDE_USB_IDS " =~ " $usb_id " ]]; then
     continue
   fi
   matched=$((matched + 1))
+  real_device_dir="$(realpath "$device_dir" 2>/dev/null || printf '%s' "$device_dir")"
+  parent_hub_dir="$(dirname "$real_device_dir")"
   if [[ "$target_state" == "enabled" ]]; then
+    if [[ -d "$parent_hub_dir" ]]; then
+      install -d -m 0755 "$(dirname "$USB_WAKE_PARENTS_FILE")"
+      touch "$USB_WAKE_PARENTS_FILE"
+      if ! grep -Fxq "$parent_hub_dir" "$USB_WAKE_PARENTS_FILE" 2>/dev/null; then
+        printf '%s\n' "$parent_hub_dir" >> "$USB_WAKE_PARENTS_FILE"
+      fi
+    fi
     enable_wakeup_path "$device_dir"
     continue
   fi
-  product="$(cat "$device_dir/product" 2>/dev/null || true)"
-  manufacturer="$(cat "$device_dir/manufacturer" 2>/dev/null || true)"
-  label="$(printf '%s %s' "$manufacturer" "$product" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
   items+=("$(printf '{"path":%s,"label":%s,"before":%s,"after":%s}' \
     "$(json_escape "$device_dir")" \
     "$(json_escape "${label:-receiver} ($usb_id)")" \
     "$(json_escape "none")" \
     "$(json_escape "none")")")
 done
+
+if [[ "$target_state" == "enabled" && -r "$USB_WAKE_PARENTS_FILE" ]]; then
+  while IFS= read -r parent_hub_dir; do
+    [[ -n "$parent_hub_dir" && -d "$parent_hub_dir" ]] || continue
+    matched=$((matched + 1))
+    enable_wakeup_path "$parent_hub_dir"
+  done < "$USB_WAKE_PARENTS_FILE"
+fi
 
 printf '{"ok":true,"matched":%d,"changed":%d,"devices":[' "$matched" "$changed"
 separator=""

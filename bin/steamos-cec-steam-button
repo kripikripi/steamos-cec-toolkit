@@ -580,7 +580,7 @@ def refresh_devices(
     open_devices: dict[str, int],
     device_kinds: dict[str, str],
     failed_devices: dict[str, float],
-) -> None:
+) -> bool:
     current: dict[str, str] = {}
     if ENABLE_STEAM_HID:
         current.update(
@@ -605,6 +605,7 @@ def refresh_devices(
             pass
         os.close(fd)
 
+    newly_opened = False
     for path in sorted(set(current) - set(open_devices)):
         now = time.monotonic()
         if now - failed_devices.get(path, 0.0) < 60:
@@ -615,10 +616,12 @@ def refresh_devices(
             open_devices[path] = fd
             device_kinds[path] = current[path]
             failed_devices.pop(path, None)
+            newly_opened = True
             LOG.info("Monitoring %s controller source at %s", current[path], path)
         except OSError as error:
             failed_devices[path] = now
             LOG.warning("Cannot monitor %s: %s", path, error)
+    return newly_opened
 
 
 def iter_input_events(data: bytes) -> list[tuple[int, int, int]]:
@@ -697,7 +700,15 @@ def main() -> None:
             last_activation = time.monotonic()
             last_resume_activation = last_activation
             activate_source("system resumed")
-        refresh_devices(selector, open_devices, device_kinds, failed_devices)
+        newly_opened = refresh_devices(selector, open_devices, device_kinds, failed_devices)
+        if (
+            newly_opened
+            and time.monotonic() >= startup_deadline
+            and time.monotonic() - last_activation >= BUTTON_DEBOUNCE_SECONDS
+        ):
+            last_activation = time.monotonic()
+            last_resume_activation = last_activation
+            activate_source("controller connected")
 
         for key, _ in selector.select(timeout=5):
             last_wall, last_monotonic, hid_resume_window_until = update_system_resume_window(
