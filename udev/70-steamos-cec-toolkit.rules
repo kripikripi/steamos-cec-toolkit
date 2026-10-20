@@ -1,3 +1,1 @@
 SUBSYSTEM=="cec", KERNEL=="cec[0-9]*", TAG+="uaccess", RUN+="/var/lib/steamos-cec-toolkit/steamos-cec-permissions-apply"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="045e", ATTR{idProduct}=="028e", RUN+="/bin/sh -c 'systemctl is-enabled --quiet steamos-cec-usb-wake.service && /var/lib/steamos-cec-toolkit/steamos-cec-usb-wake-apply on >/dev/null 2>&1 || true'"
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="04b4", ATTR{idProduct}=="2412", RUN+="/bin/sh -c 'systemctl is-enabled --quiet steamos-cec-usb-wake.service && /var/lib/steamos-cec-toolkit/steamos-cec-usb-wake-apply on >/dev/null 2>&1 || true'"
