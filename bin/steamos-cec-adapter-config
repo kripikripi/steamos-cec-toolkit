@@ -61,12 +61,18 @@ find_edid_connector() {
 }
 
 reconcile_config() {
-  local allocated phys configured_la configured_pa rc_dev
+  local allocated phys configured_la configured_pa rc_dev key_cap
   if command -v ir-keytable >/dev/null 2>&1 && [[ -r /etc/rc_keymaps/cec.toml ]]; then
     for rc_dev in /sys/class/rc/rc*; do
       [[ -r "$rc_dev/uevent" ]] || continue
       if grep -qx 'NAME=rc-cec' "$rc_dev/uevent" 2>/dev/null; then
-        ir-keytable -s "$(basename "$rc_dev")" -c -w /etc/rc_keymaps/cec.toml >/dev/null 2>&1 || true
+        key_cap="$(cat "$rc_dev"/input*/capabilities/key 2>/dev/null || true)"
+        if [[ "$key_cap" != *cffe ]]; then
+          ir-keytable -s "$(basename "$rc_dev")" -c -w /etc/rc_keymaps/cec.toml >/dev/null 2>&1 || true
+          udevadm trigger --action=remove "$rc_dev"/input*/event* 2>/dev/null || true
+          sleep 0.2
+          udevadm trigger --action=add "$rc_dev"/input*/event* 2>/dev/null || true
+        fi
       fi
     done
   fi
