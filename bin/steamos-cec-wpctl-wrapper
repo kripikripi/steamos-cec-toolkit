@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+uid="$(id -u)"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$uid}"
+
+if [[ "${1:-}" == "settings" && "${2:-}" == "--save" && "${3:-}" == "monitor.alsa.enable-external-volume-control" ]]; then
+  state="${4:-true}"
+  /usr/bin/wpctl "$@" || true
+  if [[ -x "$HOME/.local/bin/steamos-cec-toolkitctl" ]]; then
+    if [[ "$state" == "false" || "$state" == "0" ]]; then
+      "$HOME/.local/bin/steamos-cec-toolkitctl" set-wp-cec-setting off >/dev/null 2>&1 || true
+    else
+      "$HOME/.local/bin/steamos-cec-toolkitctl" set-wp-cec-setting on >/dev/null 2>&1 || true
+    fi
+  fi
+  exit 0
+fi
+
+exec /usr/bin/wpctl "$@"

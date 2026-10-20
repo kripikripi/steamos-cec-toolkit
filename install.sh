@@ -215,6 +215,10 @@ install -m 0755 "$PROJECT_DIR/bin/steamos-cec-input-away-suspend" \
   "$HOME/.local/bin/steamos-cec-input-away-suspend"
 install -m 0755 "$PROJECT_DIR/bin/steamos-cec-gamescope-recovery" \
   "$HOME/.local/bin/steamos-cec-gamescope-recovery"
+install -m 0755 "$PROJECT_DIR/bin/steamos-cec-pactl-wrapper" \
+  "$HOME/.local/bin/steamos-cec-pactl-wrapper"
+install -m 0755 "$PROJECT_DIR/bin/steamos-cec-wpctl-wrapper" \
+  "$HOME/.local/bin/steamos-cec-wpctl-wrapper"
 
 if [[ "$enable_external_volume" -eq 1 ]]; then
   "$HOME/.local/bin/steamos-cec-toolkitctl" discover-audio >/dev/null 2>&1 || true
@@ -311,6 +315,11 @@ if [[ "$enable_external_volume" -eq 1 ]]; then
     -e "s|@CEC_EXTERNAL_VOLUME_SOCKET@|/run/user/$(id -u)/steamos-cec-toolkit/org.pipewire.ExternalVolume|g" \
     "$PROJECT_DIR/wireplumber/99-steamos-cec-external-volume.conf.in" \
     > "$HOME/.config/wireplumber/wireplumber.conf.d/99-steamos-cec-external-volume.conf"
+
+  if cec_platform_generic_cec; then
+    sudo install -D -m 0755 "$PROJECT_DIR/bin/steamos-cec-pactl-wrapper" /usr/local/bin/pactl
+    sudo install -D -m 0755 "$PROJECT_DIR/bin/steamos-cec-wpctl-wrapper" /usr/local/bin/wpctl
+  fi
 fi
 
 echo "Installing user services"

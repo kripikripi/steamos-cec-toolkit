@@ -19,6 +19,8 @@ fi
 bash -n "$ROOT/scripts/easy-install.sh"
 bash -n "$ROOT/easy-install.sh"
 bash -n "$ROOT/bin/steamos-cec-adapter-config"
+bash -n "$ROOT/bin/steamos-cec-pactl-wrapper"
+bash -n "$ROOT/bin/steamos-cec-wpctl-wrapper"
 python3 -m py_compile \
   "$ROOT/bin/steamos-cec-tv-standby-suspend" \
   "$ROOT/bin/steamos-cec-input-away-suspend" \

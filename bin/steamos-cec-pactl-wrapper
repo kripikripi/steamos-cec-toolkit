@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+uid="$(id -u)"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$uid}"
+
+if [[ "${1:-}" == "send-message" && "${2:-}" == /sink/*/volume-control ]]; then
+  action="${3:-}"
+  runtime_dir="$XDG_RUNTIME_DIR"
+  socket_path="${CEC_EXTERNAL_VOLUME_SOCKET:-$runtime_dir/steamos-cec-toolkit/org.pipewire.ExternalVolume}"
+  if [[ ! -S "$socket_path" && -S "$runtime_dir/pipewire-0-ext-volume" ]]; then
+    socket_path="$runtime_dir/pipewire-0-ext-volume"
+  fi
+
+  case "$action" in
+    volume-up)
+      if [[ -S "$socket_path" ]] && [[ -x /usr/bin/varlinkctl ]]; then
+        /usr/bin/varlinkctl call "unix:$socket_path" \
+          org.pipewire.ExternalVolume.WriteVolumeRelative \
+          '{"device":"","route":"","step":1.0}' >/dev/null 2>&1 && exit 0
+      fi
+      exec "$HOME/.local/bin/steamos-cec-volume" up
+      ;;
+    volume-down)
+      if [[ -S "$socket_path" ]] && [[ -x /usr/bin/varlinkctl ]]; then
+        /usr/bin/varlinkctl call "unix:$socket_path" \
+          org.pipewire.ExternalVolume.WriteVolumeRelative \
+          '{"device":"","route":"","step":-1.0}' >/dev/null 2>&1 && exit 0
+      fi
+      exec "$HOME/.local/bin/steamos-cec-volume" down
+      ;;
+    mute-toggle)
+      if [[ -S "$socket_path" ]] && [[ -x /usr/bin/varlinkctl ]]; then
+        /usr/bin/varlinkctl call "unix:$socket_path" \
+          org.pipewire.ExternalVolume.WriteMuteToggle \
+          '{"device":"","route":""}' >/dev/null 2>&1 && exit 0
+      fi
+      exec "$HOME/.local/bin/steamos-cec-volume" mute
+      ;;
+  esac
+fi
+
+exec /usr/bin/pactl "$@"

@@ -35,6 +35,14 @@ rm -f "$HOME/.local/bin/steamos-cec-tv-standby-suspend"
 rm -f "$HOME/.local/bin/steamos-cec-input-away-suspend"
 rm -f "$HOME/.local/bin/steamos-cec-gamescope-recovery"
 rm -f "$HOME/.local/bin/steamos-cec-boot-wake"
+rm -f "$HOME/.local/bin/steamos-cec-pactl-wrapper"
+rm -f "$HOME/.local/bin/steamos-cec-wpctl-wrapper"
+if grep -q 'steamos-cec' /usr/local/bin/pactl 2>/dev/null; then
+  sudo rm -f /usr/local/bin/pactl
+fi
+if grep -q 'steamos-cec' /usr/local/bin/wpctl 2>/dev/null; then
+  sudo rm -f /usr/local/bin/wpctl
+fi
 
 systemctl --user daemon-reload
 systemctl --user stop steamos-cec-external-volume.service 2>/dev/null || true

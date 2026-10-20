@@ -17,6 +17,7 @@ monitor.alsa.rules = [
         api.acp.disable-pro-audio = true
         device.routes.default-sink-volume = 1.0
         api.alsa.external-volume-control = "unix:@CEC_EXTERNAL_VOLUME_SOCKET@"
+        steamos.supports-hdmi-cec = true
         cec-toolkit.supports-hdmi-cec = true
       }
     }
@@ -30,11 +31,25 @@ monitor.alsa.rules = [
     actions = {
       update-props = {
         session.suspend-timeout-seconds = 3600
+        device.volume.read-volume = false
+        device.volume.write-volume-value = false
+        device.volume.write-volume-updown = true
+        device.volume.read-mute = false
+        device.volume.write-mute-value = false
+        device.volume.write-mute-toggle = true
       }
     }
   }
 ]
 
-wireplumber.settings {
+wireplumber.settings.schema = {
+  monitor.alsa.enable-external-volume-control = {
+    description = "Whether to enable external HDMI-CEC volume control"
+    type = "bool"
+    default = true
+  }
+}
+
+wireplumber.settings = {
   monitor.alsa.enable-external-volume-control = true
 }

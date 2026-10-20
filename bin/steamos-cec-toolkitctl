@@ -71,6 +71,7 @@ monitor.alsa.rules = [
         api.acp.disable-pro-audio = true
         device.routes.default-sink-volume = 1.0
         api.alsa.external-volume-control = "unix:@CEC_EXTERNAL_VOLUME_SOCKET@"
+        steamos.supports-hdmi-cec = true
         cec-toolkit.supports-hdmi-cec = true
       }
     }
@@ -84,13 +85,27 @@ monitor.alsa.rules = [
     actions = {
       update-props = {
         session.suspend-timeout-seconds = 3600
+        device.volume.read-volume = @CEC_READ_VOLUME@
+        device.volume.write-volume-value = @CEC_WRITE_VOLUME_VALUE@
+        device.volume.write-volume-updown = @CEC_WRITE_VOLUME_UPDOWN@
+        device.volume.read-mute = @CEC_READ_MUTE@
+        device.volume.write-mute-value = @CEC_WRITE_MUTE_VALUE@
+        device.volume.write-mute-toggle = @CEC_WRITE_MUTE_TOGGLE@
       }
     }
   }
 ]
 
-wireplumber.settings {
-  monitor.alsa.enable-external-volume-control = true
+wireplumber.settings.schema = {
+  monitor.alsa.enable-external-volume-control = {
+    description = "Whether to enable external HDMI-CEC volume control"
+    type = "bool"
+    default = @CEC_SETTING_BOOL@
+  }
+}
+
+wireplumber.settings = {
+  monitor.alsa.enable-external-volume-control = @CEC_SETTING_BOOL@
 }
 """
 
@@ -1123,18 +1138,30 @@ def debug_cec(seconds: int) -> dict[str, Any]:
     return payload
 
 
-def write_external_volume_files() -> None:
+def write_external_volume_files(cec_enabled: bool = True) -> None:
     config = read_config()
     hdmi_alsa_card_name = config.get("HDMI_ALSA_CARD_NAME", "alsa_card.pci-0000_03_00.1")
-    hdmi_alsa_card_nick = config.get("HDMI_ALSA_CARD_NICK", "HDA ATI HDMI")
 
     wireplumber_config = (
         WIREPLUMBER_CONFIG_TEMPLATE
         .replace("@HDMI_ALSA_CARD_NAME@", hdmi_alsa_card_name)
         .replace("@CEC_EXTERNAL_VOLUME_SOCKET@", str(CEC_EXTERNAL_VOLUME_SOCKET))
+        .replace("@CEC_SETTING_BOOL@", "true" if cec_enabled else "false")
+        .replace("@CEC_READ_VOLUME@", "false" if cec_enabled else "true")
+        .replace("@CEC_WRITE_VOLUME_VALUE@", "false" if cec_enabled else "true")
+        .replace("@CEC_WRITE_VOLUME_UPDOWN@", "true" if cec_enabled else "false")
+        .replace("@CEC_READ_MUTE@", "false" if cec_enabled else "true")
+        .replace("@CEC_WRITE_MUTE_VALUE@", "false" if cec_enabled else "true")
+        .replace("@CEC_WRITE_MUTE_TOGGLE@", "true" if cec_enabled else "false")
     )
     WIREPLUMBER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
     WIREPLUMBER_CONFIG.write_text(wireplumber_config, encoding="utf-8")
+
+
+def set_wp_cec_setting(enabled: bool) -> dict[str, Any]:
+    write_external_volume_files(cec_enabled=enabled)
+    systemctl_user("restart", "wireplumber.service")
+    return status()
 
 
 
@@ -1150,6 +1177,8 @@ def set_external_volume(enabled: bool) -> dict[str, Any]:
     if enabled:
         discover_audio()
         write_external_volume_files()
+        if CEC_PERMISSIONS_HELPER.exists():
+            run(["sudo", "-n", str(CEC_PERMISSIONS_HELPER)], timeout=10)
         systemctl_user("daemon-reload")
         systemctl_user("stop", "steamos-cec-external-volume.service")
         systemctl_user("start", "steamos-cec-external-volume.socket")
@@ -1161,6 +1190,8 @@ def set_external_volume(enabled: bool) -> dict[str, Any]:
         systemctl_user("start", "steamos-cec-external-volume.service")
     else:
         remove_external_volume_files()
+        if CEC_PERMISSIONS_HELPER.exists():
+            run(["sudo", "-n", str(CEC_PERMISSIONS_HELPER)], timeout=10)
         systemctl_user("daemon-reload")
         systemctl_user("stop", "steamos-cec-external-volume.service")
         systemctl_user("stop", "steamos-cec-external-volume.socket")
@@ -1187,6 +1218,8 @@ def main() -> int:
     set_system_service_parser.add_argument("state", choices=["on", "off"])
     external_volume_parser = sub.add_parser("set-external-volume")
     external_volume_parser.add_argument("state", choices=["on", "off"])
+    wp_cec_setting_parser = sub.add_parser("set-wp-cec-setting")
+    wp_cec_setting_parser.add_argument("state", choices=["on", "off"])
     volume_parser = sub.add_parser("volume")
     volume_parser.add_argument("action", choices=["up", "down", "mute"])
     debug_parser = sub.add_parser("debug-cec")
@@ -1223,6 +1256,8 @@ def main() -> int:
         payload = set_system_service(args.name, args.state == "on")
     elif args.command == "set-external-volume":
         payload = set_external_volume(args.state == "on")
+    elif args.command == "set-wp-cec-setting":
+        payload = set_wp_cec_setting(args.state == "on")
     elif args.command == "volume":
         payload = test_volume(args.action)
     elif args.command == "debug-cec":

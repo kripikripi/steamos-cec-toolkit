@@ -48,3 +48,30 @@ else
     apply_one "$device"
   done
 fi
+
+platform_id="unknown"
+if [[ -r /etc/os-release ]]; then
+  # shellcheck disable=SC1091
+  platform_id="$(. /etc/os-release && printf '%s' "${ID:-unknown}")"
+fi
+
+if [[ "$platform_id" != "steamos" && -n "$user_home" ]]; then
+  wp_conf="$user_home/.config/wireplumber/wireplumber.conf.d/99-steamos-cec-external-volume.conf"
+  pactl_wrapper="$user_home/.local/bin/steamos-cec-pactl-wrapper"
+  wpctl_wrapper="$user_home/.local/bin/steamos-cec-wpctl-wrapper"
+  if [[ -f "$wp_conf" ]]; then
+    if [[ -f "$pactl_wrapper" ]]; then
+      install -D -m 0755 "$pactl_wrapper" /usr/local/bin/pactl
+    fi
+    if [[ -f "$wpctl_wrapper" ]]; then
+      install -D -m 0755 "$wpctl_wrapper" /usr/local/bin/wpctl
+    fi
+  else
+    if grep -q 'steamos-cec' /usr/local/bin/pactl 2>/dev/null; then
+      rm -f /usr/local/bin/pactl
+    fi
+    if grep -q 'steamos-cec' /usr/local/bin/wpctl 2>/dev/null; then
+      rm -f /usr/local/bin/wpctl
+    fi
+  fi
+fi
