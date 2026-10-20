@@ -61,7 +61,15 @@ find_edid_connector() {
 }
 
 reconcile_config() {
-  local allocated phys configured_la configured_pa
+  local allocated phys configured_la configured_pa rc_dev
+  if command -v ir-keytable >/dev/null 2>&1 && [[ -r /etc/rc_keymaps/cec.toml ]]; then
+    for rc_dev in /sys/class/rc/rc*; do
+      [[ -r "$rc_dev/uevent" ]] || continue
+      if grep -qx 'NAME=rc-cec' "$rc_dev/uevent" 2>/dev/null; then
+        ir-keytable -s "$(basename "$rc_dev")" -c -w /etc/rc_keymaps/cec.toml >/dev/null 2>&1 || true
+      fi
+    done
+  fi
   allocated="$(cec-ctl -d "$CEC_DEVICE" -s --logical-address 2>/dev/null | grep -o '[0-9]\+' | head -n1 || true)"
   if [[ "$allocated" =~ ^([1-9]|1[0-4])$ ]] && grep -q '^CEC_PLAYBACK_LOGICAL_ADDRESS=' "$CONFIG_FILE" 2>/dev/null; then
     configured_la="$(sed -n 's/^CEC_PLAYBACK_LOGICAL_ADDRESS=//p' "$CONFIG_FILE" | head -n1 | tr -d "\"'")"

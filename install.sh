@@ -258,6 +258,9 @@ sudo install -m 0755 "$PROJECT_DIR/bin/steamos-cec-usb-wake-control" \
 if cec_platform_generic_cec; then
   sudo install -m 0755 "$PROJECT_DIR/bin/steamos-cec-adapter-config" \
     /var/lib/steamos-cec-toolkit/steamos-cec-adapter-config
+  if [[ ! -f /etc/rc_keymaps/cec.toml ]]; then
+    sudo install -D -m 0644 "$PROJECT_DIR/config/rc_keymaps/cec.toml" /etc/rc_keymaps/cec.toml
+  fi
 fi
 
 echo "Installing systemd units and udev rules"
