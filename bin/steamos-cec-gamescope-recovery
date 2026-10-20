@@ -144,6 +144,24 @@ def resolve_connector_status_path() -> Path:
     return CONNECTOR_STATUS
 
 
+def connector_is_active_output(status_path: Path | None = None) -> bool:
+    resolved = status_path or resolve_connector_status_path()
+    connector_dir = resolved.parent
+    try:
+        status = resolved.read_text().strip()
+        if status != "connected":
+            return False
+        enabled_path = connector_dir / "enabled"
+        if enabled_path.exists() and enabled_path.read_text().strip() != "enabled":
+            return False
+        dpms_path = connector_dir / "dpms"
+        if dpms_path.exists() and dpms_path.read_text().strip().lower() not in {"on", ""}:
+            return False
+        return True
+    except OSError:
+        return False
+
+
 def cooldown_remaining() -> float:
     try:
         last_recovery = float(COOLDOWN_FILE.read_text().strip())
@@ -177,7 +195,7 @@ async def command_with_timeout(timeout: float, *args: str) -> tuple[int, str]:
         return 124, "timeout"
 
 
-async def recover_gamescope(reason: str, delay: float) -> None:
+async def recover_gamescope(reason: str, delay: float, state: dict[str, object] | None = None) -> None:
     await asyncio.sleep(delay)
 
     resolved_connector = resolve_connector_status_path()
@@ -188,6 +206,14 @@ async def recover_gamescope(reason: str, delay: float) -> None:
         LOG.info("Configured connector missing and no DRM connector connected; skipping Gamescope recovery")
         return
 
+    if reason != "manual" and connector_is_active_output(resolved_connector):
+        LOG.info(
+            "Connector %s is already enabled and scanning out; skipping Gamescope restart (%s)",
+            resolved_connector.parent,
+            reason,
+        )
+        return
+
     returncode, _ = await command(
         "systemctl", "--user", "is-active", "--quiet", GAMESCOPE_SESSION_SERVICE_UNIT
     )
@@ -195,6 +221,9 @@ async def recover_gamescope(reason: str, delay: float) -> None:
         LOG.info("Gaming Mode is not active; skipping Gamescope recovery")
         return
 
+    if state is not None:
+        state["last_recovery"] = time.monotonic()
+    mark_recovery_requested()
     LOG.info("Restarting Gamescope session target (%s)", reason)
     returncode, output = await command(
         "systemctl", "--user", "restart", GAMESCOPE_SESSION_TARGET_UNIT
@@ -219,11 +248,9 @@ def schedule_recovery(state: dict[str, object], reason: str) -> None:
         LOG.info("Recovery already pending (%s)", reason)
         return
 
-    LOG.info("Scheduling Gamescope recovery (%s)", reason)
-    state["last_recovery"] = now
-    mark_recovery_requested()
+    LOG.info("Scheduling Gamescope recovery check (%s)", reason)
     delay = RESUME_RECOVERY_DELAY_SECONDS if reason == "system resumed" else RECOVERY_DELAY_SECONDS
-    state["task"] = asyncio.create_task(recover_gamescope(reason, delay))
+    state["task"] = asyncio.create_task(recover_gamescope(reason, delay, state))
 
 
 def connector_status() -> str:
@@ -457,20 +484,23 @@ async def monitor_tv_power(state: dict[str, object]) -> None:
         LOG.info("TV power recovery disabled by config")
         await asyncio.get_running_loop().create_future()
 
-    previous = await tv_power_status()
+    previous = "on" if connector_is_active_output() else await tv_power_status()
     state["tv_power_status"] = previous
     LOG.info("Monitoring TV CEC power status; initial state=%s", previous)
 
     while True:
         await asyncio.sleep(TV_POWER_POLL_SECONDS)
-        current = await tv_power_status()
-        if current == previous:
+        if connector_is_active_output():
+            current = "on"
+        else:
+            current = await tv_power_status()
+        if current == previous or current == "unknown":
             continue
 
         LOG.info("TV CEC power changed: %s -> %s", previous, current)
         state["tv_power_status"] = current
 
-        if previous != "on" and current == "on" and state.get("active"):
+        if previous in {"standby", "to-standby"} and current == "on" and state.get("active"):
             schedule_recovery(state, "TV powered on while CEC source active")
 
         previous = current
@@ -500,6 +530,8 @@ async def monitor_cec_activation_marker(state: dict[str, object]) -> None:
 
         previous_mtime = current_mtime
         state["active"] = True
+        if connector_is_active_output():
+            continue
         schedule_recovery(state, "CEC activation requested")
 
 
